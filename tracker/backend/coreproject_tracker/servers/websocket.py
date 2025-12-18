@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import logging
-from typing import cast
 
 from quart import Blueprint, copy_current_websocket_context, json, websocket
 
@@ -125,18 +124,18 @@ async def ws():
                 fields=random_peer_keys,
                 namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
             )
-            print(peer_json_list)
 
             for peer in peer_json_list:
-                try:
-                    with rollback_on_exception(seeders, leechers):
-                        peer_info = RedisDatastructure(**json.loads(peer))
-                        if peer_info.left == 0:
-                            seeders.value += 1
-                        else:
-                            leechers.value += 1
-                except TypeError:
-                    pass
+                if peer:
+                    try:
+                        with rollback_on_exception(seeders, leechers):
+                            peer_info = RedisDatastructure(**json.loads(peer))
+                            if peer_info.left == 0:
+                                seeders.value += 1
+                            else:
+                                leechers.value += 1
+                    except TypeError:
+                        pass
 
             response |= {"completed": seeders.value, "incompleted": leechers.value}
 
@@ -153,20 +152,21 @@ async def ws():
             # Handle offers by publishing to respective peers
             if offers := data.offers:
                 for value in peer_json_list:
-                    value = cast(str, value)
-
-                    peer_info = RedisDatastructure(**json.loads(value))
-                    for offer in offers:
-                        message = json.dumps(
-                            {
-                                "action": "announce",
-                                "offer": offer["offer"],
-                                "offer_id": offer["offer_id"],
-                                "peer_id": await bytes_to_bin_str(data.peer_id),
-                                "info_hash": await hex_str_to_bin_str(data.info_hash),
-                            }
-                        )
-                        await redis.publish(f"peer:{peer_info.peer_id}", message)
+                    if value:
+                        peer_info = RedisDatastructure(**json.loads(value))
+                        for offer in offers:
+                            message = json.dumps(
+                                {
+                                    "action": "announce",
+                                    "offer": offer["offer"],
+                                    "offer_id": offer["offer_id"],
+                                    "peer_id": await bytes_to_bin_str(data.peer_id),
+                                    "info_hash": await hex_str_to_bin_str(
+                                        data.info_hash
+                                    ),
+                                }
+                            )
+                            await redis.publish(f"peer:{peer_info.peer_id}", message)
 
             # Handle answers by publishing to the target peer
             if data.answer:
