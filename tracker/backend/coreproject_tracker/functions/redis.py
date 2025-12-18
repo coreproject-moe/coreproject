@@ -81,6 +81,7 @@ async def get_all_hash_keys():
 
     return hash_keys
 
+
 async def zadd(
     hash_key: str,
     field: str,
@@ -125,4 +126,4 @@ async def zrem(
     await r.zrem(namespaced_key, field)
 
 
-__all__ = ["hset","hget","hdel","zadd","zrandmember",'zrem']
+__all__ = ["hset", "hget", "hdel", "zadd", "zrandmember", "zrem"]

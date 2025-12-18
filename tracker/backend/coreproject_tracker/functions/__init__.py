@@ -28,5 +28,5 @@ from .redis import (
     hset as hset,
     zadd as zadd,
     zrandmember as zrandmember,
-    zrem as zrem
+    zrem as zrem,
 )
