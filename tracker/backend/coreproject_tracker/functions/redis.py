@@ -4,12 +4,16 @@ import time
 from quart import json as quart_json
 
 from coreproject_tracker.constants import HASH_EXPIRE_TIME
-from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.enums import REDIS_NAMESPACE_ENUM
+from coreproject_tracker.singletons import get_redis
 
 
 def _ns_key(namespace: REDIS_NAMESPACE_ENUM, key: str) -> str:
     return f"{namespace.value}:{key}"
+
+
+def _ns_key_z(namespace: REDIS_NAMESPACE_ENUM, key: str) -> str:
+    return f"{_ns_key(namespace, key)}:zset"
 
 
 async def hset(
@@ -28,7 +32,7 @@ async def hset(
     await r.expire(namespaced_key, HASH_EXPIRE_TIME)
 
 
-async def hget(
+async def hgetall(
     hash_key: str,
     namespace: REDIS_NAMESPACE_ENUM,
 ) -> None | dict[str, str]:
@@ -52,6 +56,32 @@ async def hget(
             valid_fields[field] = value
 
     return valid_fields
+
+
+async def hmget(
+    hash_key: str,
+    fields: list[str],
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> list[str | None]:
+    """
+    Fetch multiple fields from a namespaced hash using HMGET.
+    Only retrieves the requested fields, avoiding HGETALL scans.
+
+    Args:
+        hash_key: The hash key in Redis
+        fields: List of field names to retrieve
+        namespace: Namespace enum
+
+    Returns:
+        List of values corresponding to each field (None if missing)
+    """
+    if not fields:
+        return []
+
+    r = get_redis()
+    namespaced_key = _ns_key(namespace, hash_key)
+    values = await r.hmget(namespaced_key, *fields)  # type: ignore[no-untyped-call]
+    return values
 
 
 async def hdel(
@@ -80,3 +110,50 @@ async def get_all_hash_keys():
             break
 
     return hash_keys
+
+
+async def zadd(
+    hash_key: str,
+    field: str,
+    weight: float,
+    expire_time: int,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> None:
+    """
+    Add or update a peer in a ZSET with a weight, using the same namespace style as hset.
+    """
+    r = get_redis()
+    namespaced_key = _ns_key_z(namespace, hash_key)
+
+    await r.zadd(namespaced_key, {field: weight})
+    await r.expire(namespaced_key, expire_time)
+
+
+async def zrandmember(
+    hash_key: str,
+    numwant: int,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> list[str]:
+    """
+    Return up to `numwant` random members from a namespaced ZSET.
+    """
+    r = get_redis()
+    namespaced_key = _ns_key_z(namespace, hash_key)
+    members = await r.zrandmember(namespaced_key, numwant, withscores=False)
+    return members or []
+
+
+async def zrem(
+    hash_key: str,
+    field: str,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> None:
+    """
+    Remove a peer from a namespaced ZSET.
+    """
+    r = get_redis()
+    namespaced_key = _ns_key_z(namespace, hash_key)
+    await r.zrem(namespaced_key, field)
+
+
+__all__ = ["hset", "hgetall", "hmget", "hdel", "zadd", "zrandmember", "zrem"]

@@ -19,10 +19,10 @@ from coreproject_tracker.functions import (
     from_uint16,
     from_uint32,
     from_uint64,
-    get_n_random_items,
     hdel,
-    hget,
+    hmget,
     to_uint32,
+    zrandmember,
 )
 from coreproject_tracker.singletons import RedisHandler
 from coreproject_tracker.transaction import rollback_on_exception
@@ -142,21 +142,21 @@ async def run_udp_server(server_host: str, server_port: int):
 
                     await redis_stroage.save()
 
-                    redis_data = (
-                        await hget(
-                            data.info_hash.hex(),
-                            namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-                        )
-                        or {}
+                    random_peer_keys = await zrandmember(
+                        hash_key=data.info_hash.hex(),
+                        numwant=data.numwant,
+                        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
                     )
-                    peers_list = await get_n_random_items(
-                        redis_data.values(), data.numwant
+                    peer_json_list = await hmget(
+                        hash_key=data.info_hash.hex(),
+                        fields=random_peer_keys,
+                        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
                     )
 
                     peers = MutableBox[list[str]]([])
                     seeders = leechers = MutableBox[int](0)
 
-                    for peer in peers_list:
+                    for peer in peer_json_list:
                         peer = cast(str, peer)
 
                         try:
@@ -177,7 +177,7 @@ async def run_udp_server(server_host: str, server_port: int):
                                 f"Error in peer data, deleting the peer: {data.peer_id}"
                             )
                             await hdel(
-                                data.info_hash,
+                                data.info_hash.hex(),
                                 f"{data.ip}:{data.port}",
                                 namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
                             )
@@ -191,7 +191,7 @@ async def run_udp_server(server_host: str, server_port: int):
 
                 if data.event_name == EVENT_NAMES.STOP:
                     await hdel(
-                        data.info_hash,
+                        data.info_hash.hex(),
                         f"{data.ip}:{data.port}",
                         namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
                     )
