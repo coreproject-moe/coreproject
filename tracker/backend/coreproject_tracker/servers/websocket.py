@@ -125,10 +125,9 @@ async def ws():
                 fields=random_peer_keys,
                 namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
             )
+            print(peer_json_list)
 
             for peer in peer_json_list:
-                peer = cast(str, peer)
-
                 try:
                     with rollback_on_exception(seeders, leechers):
                         peer_info = RedisDatastructure(**json.loads(peer))
@@ -136,7 +135,7 @@ async def ws():
                             seeders.value += 1
                         else:
                             leechers.value += 1
-                except TypeError:
+                except:
                     pass
 
             response |= {"completed": seeders.value, "incompleted": leechers.value}
