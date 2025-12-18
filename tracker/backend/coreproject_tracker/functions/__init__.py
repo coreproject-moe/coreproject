@@ -30,3 +30,4 @@ from .redis import (
     zrandmember as zrandmember,
     zrem as zrem,
 )
+from .weight import calculate_weight as calculate_weight

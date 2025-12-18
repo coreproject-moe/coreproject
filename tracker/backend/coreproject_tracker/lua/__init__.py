@@ -1,4 +1,5 @@
 import os
+
 from coreproject_tracker.singletons import get_redis
 
 r = get_redis()
