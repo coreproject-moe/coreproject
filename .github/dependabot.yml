@@ -26,7 +26,13 @@ updates:
       schedule:
           interval: weekly
       open-pull-requests-limit: 100
-
+   
+    - package-ecosystem: uv
+      directory: /tracker/backend/docs/
+      schedule:
+          interval: weekly
+      open-pull-requests-limit: 100
+      
     # Bots
     # =====
     - package-ecosystem: pip
@@ -46,3 +52,4 @@ updates:
       directory: '/'
       schedule:
           interval: 'weekly'
+
