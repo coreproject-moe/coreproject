@@ -17,7 +17,8 @@ from coreproject_tracker.functions import (
     convert_event_name_to_event_enum,
     hdel,
     hex_str_to_bin_str,
-    hget,
+    hmget,
+    zrandmember,
 )
 from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
@@ -113,11 +114,19 @@ async def ws():
             await redis_storage.save()
 
             seeders = leechers = MutableBox[int](0)
-            redis_data = (
-                await hget(data.info_hash, namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET)
-                or {}
+
+            random_peer_keys = await zrandmember(
+                hash_key=data.info_hash,
+                numwant=data.numwant,
+                namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
             )
-            for peer in redis_data.values():
+            peer_json_list = await hmget(
+                hash_key=data.info_hash,
+                fields=random_peer_keys,
+                namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
+            )
+
+            for peer in peer_json_list:
                 peer = cast(str, peer)
 
                 try:
@@ -144,7 +153,7 @@ async def ws():
 
             # Handle offers by publishing to respective peers
             if offers := data.offers:
-                for value in redis_data.values():
+                for value in peer_json_list:
                     value = cast(str, value)
 
                     peer_info = RedisDatastructure(**json.loads(value))

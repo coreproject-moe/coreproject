@@ -1,4 +1,3 @@
-from .array import get_n_random_items as get_n_random_items
 from .bytes import (
     from_uint16 as from_uint16,
     from_uint32 as from_uint32,
@@ -24,7 +23,8 @@ from .ip import (
 from .redis import (
     get_all_hash_keys as get_all_hash_keys,
     hdel as hdel,
-    hget as hget,
+    hgetall as hgetall,
+    hmget as hmget,
     hset as hset,
     zadd as zadd,
     zrandmember as zrandmember,

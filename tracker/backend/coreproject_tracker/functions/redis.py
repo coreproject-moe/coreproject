@@ -28,7 +28,7 @@ async def hset(
     await r.expire(namespaced_key, HASH_EXPIRE_TIME)
 
 
-async def hget(
+async def hgetall(
     hash_key: str,
     namespace: REDIS_NAMESPACE_ENUM,
 ) -> None | dict[str, str]:
@@ -52,6 +52,32 @@ async def hget(
             valid_fields[field] = value
 
     return valid_fields
+
+
+async def hmget(
+    hash_key: str,
+    fields: list[str],
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> list[str | None]:
+    """
+    Fetch multiple fields from a namespaced hash using HMGET.
+    Only retrieves the requested fields, avoiding HGETALL scans.
+
+    Args:
+        hash_key: The hash key in Redis
+        fields: List of field names to retrieve
+        namespace: Namespace enum
+
+    Returns:
+        List of values corresponding to each field (None if missing)
+    """
+    if not fields:
+        return []
+
+    r = get_redis()
+    namespaced_key = _ns_key(namespace, hash_key)
+    values = await r.hmget(namespaced_key, *fields)  # type: ignore[no-untyped-call]
+    return values
 
 
 async def hdel(

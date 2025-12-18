@@ -19,9 +19,10 @@ from coreproject_tracker.functions import (
     convert_event_name_to_event_enum,
     decode_dictionary,
     get_all_hash_keys,
-    get_n_random_items,
     hdel,
-    hget,
+    hmget,
+    hgetall,
+    zrandmember,
 )
 from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
@@ -97,11 +98,18 @@ async def http_endpoint():
     peers = peers6 = MutableBox[list[dict[str, str]]]([])
     seeders = leechers = MutableBox[int](0)
 
-    redis_data = (
-        await hget(data.info_hash, namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP) or {}
+    random_peer_keys = await zrandmember(
+        hash_key=data.info_hash,
+        numwant=data.numwant,
+        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
+    )
+    peer_json_list = await hmget(
+        hash_key=data.info_hash,
+        fields=random_peer_keys,
+        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
     )
 
-    for peer in await get_n_random_items(redis_data.values(), data.numwant):
+    for peer in peer_json_list:
         try:
             peer = cast(str, peer)
             with rollback_on_exception(peers, peers6, seeders, leechers):
