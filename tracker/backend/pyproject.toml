@@ -25,6 +25,7 @@ coreproject_tracker = "coreproject_tracker.__main__:main"
 [dependency-groups]
 dev = [
     "py-spy>=0.4.0",
+    "ruff>=0.14.9",
 ]
 lint = [
     "ruff>=0.9.7",

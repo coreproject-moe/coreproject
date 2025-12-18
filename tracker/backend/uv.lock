@@ -388,6 +388,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "py-spy" },
+    { name = "ruff" },
 ]
 lint = [
     { name = "ruff" },
@@ -407,7 +408,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "py-spy", specifier = ">=0.4.0" }]
+dev = [
+    { name = "py-spy", specifier = ">=0.4.0" },
+    { name = "ruff", specifier = ">=0.14.9" },
+]
 lint = [{ name = "ruff", specifier = ">=0.9.7" }]
 
 [[package]]

@@ -26,4 +26,7 @@ from .redis import (
     hdel as hdel,
     hget as hget,
     hset as hset,
+    zadd as zadd,
+    zrandmember as zrandmember,
+    zrem as zrem
 )

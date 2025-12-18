@@ -15,5 +15,5 @@ async def get_n_random_items[T](array: Iterable[T], n: int) -> list[T]:
         ret = random.sample(array, n)
     except ValueError:
         ret = array
-    finally:
-        return ret
+        
+    return ret
