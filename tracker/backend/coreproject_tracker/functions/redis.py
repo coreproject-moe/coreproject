@@ -80,3 +80,46 @@ async def get_all_hash_keys():
             break
 
     return hash_keys
+
+async def zadd(
+    hash_key: str,
+    field: str,
+    weight: float,
+    expire_time: int,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> None:
+    """
+    Add or update a peer in a ZSET with a weight, using the same namespace style as hset.
+    """
+    r = get_redis()
+    namespaced_key = _ns_key(namespace, hash_key)
+
+    await r.zadd(namespaced_key, {field: weight})
+    await r.expire(namespaced_key, expire_time)
+
+
+async def zrandmember(
+    hash_key: str,
+    numwant: int,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> list[str]:
+    """
+    Return up to `numwant` random members from a namespaced ZSET.
+    """
+    r = get_redis()
+    namespaced_key = _ns_key(namespace, hash_key)
+    members = await r.zrandmember(namespaced_key, numwant, withscores=False)
+    return members or []
+
+
+async def zrem(
+    hash_key: str,
+    field: str,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> None:
+    """
+    Remove a peer from a namespaced ZSET.
+    """
+    r = get_redis()
+    namespaced_key = _ns_key(namespace, hash_key)
+    await r.zrem(namespaced_key, field)
