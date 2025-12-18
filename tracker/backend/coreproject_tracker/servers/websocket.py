@@ -135,7 +135,7 @@ async def ws():
                             seeders.value += 1
                         else:
                             leechers.value += 1
-                except:
+                except TypeError:
                     pass
 
             response |= {"completed": seeders.value, "incompleted": leechers.value}
