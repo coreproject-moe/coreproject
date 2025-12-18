@@ -27,25 +27,6 @@ updates:
           interval: weekly
       open-pull-requests-limit: 100
 
-
-
-
-    # Seeder
-    # =======
-    - package-ecosystem: npm
-      directory: /seeder/
-      schedule:
-          interval: weekly
-      open-pull-requests-limit: 100
-   
-    
-    - package-ecosystem: uv
-      directory: /seeder/
-      schedule:
-          interval: weekly
-      open-pull-requests-limit: 100
-
-
     # Bots
     # =====
     - package-ecosystem: pip
@@ -54,7 +35,6 @@ updates:
           interval: weekly
       open-pull-requests-limit: 100
 
-    
     #Frontend
     #- package-ecosystem: 'npm'
     #  directory: '/frontend'
