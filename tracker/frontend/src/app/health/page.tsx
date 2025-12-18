@@ -226,9 +226,9 @@ function WebsocketTrackerCard() {
       // @ts-expect-error: console is present in runtime
       ref.current.contentWindow!.console = {
         ...console,
-        log: () => {},
-        error: () => {},
-        warn: () => {},
+        log: () => { },
+        error: () => { },
+        warn: () => { },
       };
     },
     [SHOW_CONSOLE],

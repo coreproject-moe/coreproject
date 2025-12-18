@@ -1,4 +1,7 @@
-from coreproject_tracker.datastructures import RedisDatastructure
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from coreproject_tracker.datastructures import RedisDatastructure
 
 
 def calculate_weight(peer_data: RedisDatastructure) -> float:

@@ -21,7 +21,6 @@ from coreproject_tracker.functions import (
     get_all_hash_keys,
     hdel,
     hmget,
-    hgetall,
     zrandmember,
 )
 from coreproject_tracker.singletons import get_redis
