@@ -1,4 +1,5 @@
 ---
+title: License
 icon: lucide/scale
 ---
 GNU Affero General Public License
