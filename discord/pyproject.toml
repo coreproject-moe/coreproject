@@ -8,7 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11"
 discord-py = "^2.7.1"
-sqlalchemy = {extras = ["postgresql-asyncpg"], version = "^2.0.48"}
+sqlalchemy = {extras = ["postgresql-asyncpg"], version = "^2.0.49"}
 aiohttp-jinja2 = "^1.6"
 alembic = "^1.18.4"
 
