@@ -12,7 +12,7 @@ dependencies = [
     "hypercorn>=0.17.3",
     "quart>=0.20.0",
     "quart-cors>=0.8.0",
-    "redis[hiredis]>=5.2.1",
+    "redis[hiredis]>=7.4.0",
     "uvloop>=0.21.0; sys_platform == 'linux'",
 ]
 
