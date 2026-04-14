@@ -50,7 +50,7 @@ dev = [
     "django-extensions>=3.2.3,<5",
 ]
 test = [
-    "pytest>=8.3.4,<10",
+    "pytest>=9.0.3,<10",
     "pytest-django>=4.9.0,<5",
 ]
 
