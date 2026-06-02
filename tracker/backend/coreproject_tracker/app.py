@@ -8,8 +8,9 @@ try:
 except ImportError:
     HAS_FLASK_ORJSON = False
 
-from coreproject_tracker.envs import REDIS_URI
+from coreproject_tracker.envs import BLOCKLIST_PATH, REDIS_URI
 from coreproject_tracker.servers import http_blueprint, ws_blueprint
+from coreproject_tracker.validators import _load_blocklist
 
 
 def make_app() -> Quart:
@@ -18,6 +19,9 @@ def make_app() -> Quart:
 
     if HAS_FLASK_ORJSON:
         app.json = OrjsonProvider(app)  # type: ignore
+
+    if BLOCKLIST_PATH:
+        _load_blocklist(BLOCKLIST_PATH)
 
     from coreproject_tracker.singletons.redis import RedisHandler
 

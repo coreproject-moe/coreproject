@@ -46,7 +46,7 @@ def run_http_websocket_server(host: str, port: int) -> None:
 
 async def _main_async_wrapper(host: str, port: int) -> None:
     """Async context for server management"""
-    ip_type = await check_ip_type(host)
+    ip_type = check_ip_type(host)
     if ip_type == IP.IPV6:
         if sys.platform == "win32":
             raise ValueError(

@@ -26,6 +26,7 @@ from .redis import (
     hgetall as hgetall,
     hmget as hmget,
     hset as hset,
+    save_peer_pipeline as save_peer_pipeline,
     zadd as zadd,
     zrandmember as zrandmember,
     zrem as zrem,

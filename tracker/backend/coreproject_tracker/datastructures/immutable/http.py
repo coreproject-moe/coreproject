@@ -7,7 +7,7 @@ from coreproject_tracker.converters import (
 )
 from coreproject_tracker.enums import EVENT_NAMES
 from coreproject_tracker.validators import (
-    validate_20_length,
+    validate_info_hash_length,
     validate_ip,
     validate_port,
 )
@@ -19,7 +19,7 @@ __all__ = ["HttpDatastructure"]
 class HttpDatastructure:
     info_hash_raw: bytes = field(
         converter=convert_to_url_bytes,
-        validator=[validate_20_length],
+        validator=[validate_info_hash_length],
     )
     port: int = field(converter=int, validator=[validate_port])
     left: int = field(converter=int)
