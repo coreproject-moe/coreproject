@@ -28,7 +28,14 @@ from .redis import (
     hset as hset,
     save_peer_pipeline as save_peer_pipeline,
     zadd as zadd,
+    zcard as zcard,
     zrandmember as zrandmember,
+    zrandmember_with_scores as zrandmember_with_scores,
     zrem as zrem,
 )
-from .weight import calculate_weight as calculate_weight
+from .weight import (
+    calculate_base_weight as calculate_base_weight,
+    RankedPeer as RankedPeer,
+    rank_peers as rank_peers,
+)
+from .peers import select_peers as select_peers

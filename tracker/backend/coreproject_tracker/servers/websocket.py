@@ -16,9 +16,9 @@ from coreproject_tracker.functions import (
     convert_event_name_to_event_enum,
     hdel,
     hex_str_to_bin_str,
-    hmget,
-    zrandmember,
+    select_peers,
 )
+from coreproject_tracker.geo import resolve_country
 from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
 
@@ -90,6 +90,9 @@ async def ws():
             if not data.peer_id:
                 raise ValueError("WEBSOCKET: `peer_id` is required for saving to redis")
 
+            # Resolve country (non-blocking, cached in Redis)
+            country = await resolve_country(data.ip)
+
             redis_storage = RedisDatastructure(
                 info_hash=data.info_hash,
                 type="websocket",
@@ -97,30 +100,25 @@ async def ws():
                 peer_ip=data.ip,
                 port=data.port,
                 left=int(data.left) if data.left is not None else None,
+                country=country,
             )
             await redis_storage.save()
+
+            # Geo-aware peer selection with oversampling + ranking
+            ranked_peers = await select_peers(
+                requester_ip=data.ip,
+                info_hash=data.info_hash,
+                numwant=data.numwant,
+                namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
+            )
 
             seeders = MutableBox[int](0)
             leechers = MutableBox[int](0)
 
-            random_peer_keys = await zrandmember(
-                hash_key=data.info_hash,
-                numwant=data.numwant,
-                namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
-            )
-            peer_json_list = await hmget(
-                hash_key=data.info_hash,
-                fields=random_peer_keys,
-                namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
-            )
-
-            for peer in peer_json_list:
-                if not peer:
-                    continue
+            for ranked in ranked_peers:
                 try:
                     with rollback_on_exception(seeders, leechers):
-                        peer_info = RedisDatastructure(**json.loads(peer))
-                        if peer_info.left == 0:
+                        if ranked.left == 0:
                             seeders.value += 1
                         else:
                             leechers.value += 1
@@ -140,20 +138,20 @@ async def ws():
                 await websocket.send_json(response)
 
             if offers := data.offers:
-                for value in peer_json_list:
-                    if value:
-                        peer_info = RedisDatastructure(**json.loads(value))
-                        for offer in offers:
-                            message = json.dumps({
-                                "action": "announce",
-                                "offer": offer["offer"],
-                                "offer_id": offer["offer_id"],
-                                "peer_id": bytes_to_bin_str(data.peer_id),
-                                "info_hash": hex_str_to_bin_str(data.info_hash),
-                            })
-                            await redis.publish(
-                                f"peer:{peer_info.peer_id}", message
-                            )
+                # Fetch peer data for offer distribution
+                for ranked in ranked_peers:
+                    peer_id = ranked.peer_id
+                    for offer in offers:
+                        message = json.dumps({
+                            "action": "announce",
+                            "offer": offer["offer"],
+                            "offer_id": offer["offer_id"],
+                            "peer_id": bytes_to_bin_str(data.peer_id),
+                            "info_hash": hex_str_to_bin_str(data.info_hash),
+                        })
+                        await redis.publish(
+                            f"peer:{peer_id}", message
+                        )
 
             if data.answer:
                 if not data.to_peer_id:

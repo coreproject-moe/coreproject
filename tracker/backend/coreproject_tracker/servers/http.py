@@ -20,9 +20,9 @@ from coreproject_tracker.functions import (
     decode_dictionary,
     get_all_hash_keys,
     hdel,
-    hmget,
-    zrandmember,
+    select_peers,
 )
+from coreproject_tracker.geo import resolve_country
 from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
 from coreproject_tracker.validators import check_rate_limit, is_blocked
@@ -85,6 +85,9 @@ async def http_endpoint():
         )
         return ""
 
+    # Resolve country (non-blocking, cached in Redis)
+    country = await resolve_country(ip)
+
     redis_storage = RedisDatastructure(
         info_hash=data.info_hash,
         type="http",
@@ -92,45 +95,39 @@ async def http_endpoint():
         peer_ip=data.peer_ip,
         port=data.port,
         left=data.left,
+        country=country,
     )
 
     await redis_storage.save()
+
+    # Geo-aware peer selection with oversampling + ranking
+    ranked_peers = await select_peers(
+        requester_ip=ip,
+        info_hash=data.info_hash,
+        numwant=data.numwant,
+        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
+    )
 
     peers = MutableBox[list[dict[str, str]]]([])
     peers6 = MutableBox[list[dict[str, str]]]([])
     seeders = MutableBox[int](0)
     leechers = MutableBox[int](0)
 
-    random_peer_keys = await zrandmember(
-        hash_key=data.info_hash,
-        numwant=data.numwant,
-        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-    )
-    peer_json_list = await hmget(
-        hash_key=data.info_hash,
-        fields=random_peer_keys,
-        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-    )
-
-    for peer in peer_json_list:
-        if not peer:
-            continue
+    for ranked in ranked_peers:
         try:
             with rollback_on_exception(peers, peers6, seeders, leechers):
-                peer_data = RedisDatastructure(**json.loads(peer))
-
-                if peer_data.left == 0:
+                if ranked.left == 0:
                     seeders.value += 1
                 else:
                     leechers.value += 1
 
                 appendable_data = {
-                    "peer id": peer_data.peer_id,
-                    "ip": peer_data.peer_ip,
-                    "port": peer_data.port,
+                    "peer id": ranked.peer_id,
+                    "ip": ranked.peer_ip,
+                    "port": ranked.port,
                 }
 
-                if (ip_type := check_ip_type(peer_data.peer_ip)):
+                if (ip_type := check_ip_type(ranked.peer_ip)):
                     if ip_type == IP.IPV4:
                         peers.value.append(appendable_data)
                     else:
@@ -179,27 +176,18 @@ async def scrape_endpoint():
     seeders = 0
     leechers = 0
 
-    peer_keys = await zrandmember(
-        hash_key=info_hash,
+    # Use select_peers with large numwant to get all peers for scrape
+    ranked_peers = await select_peers(
+        requester_ip=ip,
+        info_hash=info_hash,
         numwant=999999,
         namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
     )
-    if peer_keys:
-        peer_json_list = await hmget(
-            hash_key=info_hash,
-            fields=peer_keys,
-            namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-        )
-        for peer in peer_json_list:
-            if peer:
-                try:
-                    peer_data = RedisDatastructure(**json.loads(peer))
-                    if peer_data.left == 0:
-                        seeders += 1
-                    else:
-                        leechers += 1
-                except TypeError:
-                    pass
+    for ranked in ranked_peers:
+        if ranked.left == 0:
+            seeders += 1
+        else:
+            leechers += 1
 
     response = {
         "files": {
