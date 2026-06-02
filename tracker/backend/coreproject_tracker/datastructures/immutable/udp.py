@@ -7,7 +7,7 @@ from coreproject_tracker.constants import (
 )
 from coreproject_tracker.enums import EVENT_NAMES
 from coreproject_tracker.validators import (
-    validate_20_length,
+    validate_info_hash_length,
     validate_connection_id,
     validate_ip,
     validate_port,
@@ -30,7 +30,7 @@ class UdpDatastructure:
     transaction_id: int = field(validator=validators.instance_of(int))
 
     # Only available on ANNOUNCE
-    info_hash: bytes = field(default=None, validator=[validate_20_length])
+    info_hash: bytes = field(default=None, validator=[validate_info_hash_length])
     peer_id: str = field(default=None)
     downloaded: int = field(default=None)
     left: int = field(default=None)

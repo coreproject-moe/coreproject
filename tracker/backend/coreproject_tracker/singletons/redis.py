@@ -22,7 +22,7 @@ class RedisHandler:
     async def __attempt_to_connect(conn: Redis, attempts: int):
         for attempt in range(1, attempts + 1):
             try:
-                await conn.ping()
+                await conn.ping()  # pyrefly: ignore[not-async]
                 logger.debug("Redis connection established")
                 break
             except RedisError:

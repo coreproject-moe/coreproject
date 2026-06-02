@@ -51,7 +51,6 @@ async def hgetall(
             decoded = quart_json.loads(value)
         except json.JSONDecodeError:
             continue
-
         if isinstance(decoded, dict):
             valid_fields[field] = value
 
@@ -63,18 +62,6 @@ async def hmget(
     fields: list[str],
     namespace: REDIS_NAMESPACE_ENUM,
 ) -> list[str | None]:
-    """
-    Fetch multiple fields from a namespaced hash using HMGET.
-    Only retrieves the requested fields, avoiding HGETALL scans.
-
-    Args:
-        hash_key: The hash key in Redis
-        fields: List of field names to retrieve
-        namespace: Namespace enum
-
-    Returns:
-        List of values corresponding to each field (None if missing)
-    """
     if not fields:
         return []
 
@@ -91,13 +78,15 @@ async def hdel(
 ) -> None:
     r = get_redis()
     namespaced_key = _ns_key(namespace, hash_key)
-
-    await r.hdel(namespaced_key, field_name)  # type: ignore[no-untyped-call]
+    namespaced_zkey = _ns_key_z(namespace, hash_key)
+    pipe = await r.pipeline()
+    await pipe.hdel(namespaced_key, field_name)  # type: ignore[no-untyped-call]
+    await pipe.zrem(namespaced_zkey, field_name)
+    await pipe.execute()
 
 
 async def get_all_hash_keys():
     r = get_redis()
-
     cursor = 0
     hash_keys = []
 
@@ -119,14 +108,33 @@ async def zadd(
     expire_time: int,
     namespace: REDIS_NAMESPACE_ENUM,
 ) -> None:
-    """
-    Add or update a peer in a ZSET with a weight, using the same namespace style as hset.
-    """
     r = get_redis()
     namespaced_key = _ns_key_z(namespace, hash_key)
-
     await r.zadd(namespaced_key, {field: weight})
     await r.expire(namespaced_key, expire_time)
+
+
+async def save_peer_pipeline(
+    hash_key: str,
+    field: str,
+    value: str,
+    weight: float,
+    expire_time: int,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> None:
+    """Save hash field + zset member + TTLs in a single pipeline round-trip."""
+    r = get_redis()
+    namespaced_key = _ns_key(namespace, hash_key)
+    namespaced_zkey = _ns_key_z(namespace, hash_key)
+    expiration = int(time.time() + expire_time)
+
+    pipe = await r.pipeline()
+    await pipe.hset(namespaced_key, field, value)  # type: ignore[no-untyped-call]
+    await pipe.hexpireat(namespaced_key, expiration, field)
+    await pipe.expire(namespaced_key, HASH_EXPIRE_TIME)
+    await pipe.zadd(namespaced_zkey, {field: weight})
+    await pipe.expire(namespaced_zkey, expire_time)
+    await pipe.execute()
 
 
 async def zrandmember(
@@ -134,9 +142,6 @@ async def zrandmember(
     numwant: int,
     namespace: REDIS_NAMESPACE_ENUM,
 ) -> list[str]:
-    """
-    Return up to `numwant` random members from a namespaced ZSET.
-    """
     r = get_redis()
     namespaced_key = _ns_key_z(namespace, hash_key)
     members = await r.zrandmember(namespaced_key, numwant, withscores=False)
@@ -148,12 +153,13 @@ async def zrem(
     field: str,
     namespace: REDIS_NAMESPACE_ENUM,
 ) -> None:
-    """
-    Remove a peer from a namespaced ZSET.
-    """
     r = get_redis()
     namespaced_key = _ns_key_z(namespace, hash_key)
     await r.zrem(namespaced_key, field)
 
 
-__all__ = ["hset", "hgetall", "hmget", "hdel", "zadd", "zrandmember", "zrem"]
+__all__ = [
+    "hset", "hgetall", "hmget", "hdel",
+    "zadd", "zrandmember", "zrem",
+    "save_peer_pipeline", "get_all_hash_keys",
+]

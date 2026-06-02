@@ -4,7 +4,7 @@ from coreproject_tracker.constants import DEFAULT_ANNOUNCE_PEERS, MAX_ANNOUNCE_P
 from coreproject_tracker.converters import convert_binary_string_to_bytes
 from coreproject_tracker.enums import EVENT_NAMES
 from coreproject_tracker.validators import (
-    validate_20_length,
+    validate_info_hash_length,
     validate_ip,
     validate_peer_length,
     validate_port,
@@ -17,7 +17,7 @@ __all__ = ["WebsocketDatastructure"]
 class WebsocketDatastructure:
     info_hash_raw: bytes | None = field(
         converter=convert_binary_string_to_bytes,
-        validator=[validate_20_length],
+        validator=[validate_info_hash_length],
     )
     action: str = field(validator=[validators.instance_of(str)])
     peer_id: (
