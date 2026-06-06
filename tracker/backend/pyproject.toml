@@ -30,11 +30,19 @@ dev = [
 ]
 lint = [
     "ruff>=0.15.14",
-
+]
+test = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "httpx2>=0.1.0",
+    "respx>=0.22.0",
+    "time-machine>=2.16.0",
+    "dirty-equals>=0.8.0",
 ]
 
 [tool.uv]
-default-groups = ["dev", "lint"]
+default-groups = ["dev", "lint", "test"]
 package = true
 
 [tool.ruff.lint]
@@ -46,3 +54,33 @@ skip-magic-trailing-comma = false  # Avoids conflict with isort.split-on-trailin
 [tool.ruff.lint.isort]
 split-on-trailing-comma = true  # Keep this aligned with format.skip-magic-trailing-comma
 combine-as-imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "--cov=coreproject_tracker",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=100",
+    "-v",
+    "--tb=short",
+]
+filterwarnings = [
+    "error",
+]
+
+[tool.coverage.run]
+source = ["coreproject_tracker"]
+branch = true
+
+[tool.coverage.paths]
+source = ["coreproject_tracker", "*/site-packages/coreproject_tracker"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+]
