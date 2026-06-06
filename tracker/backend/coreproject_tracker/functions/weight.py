@@ -21,7 +21,7 @@ class RankedPeer:
     uploaded: int = 0
 
 
-def calculate_base_weight(peer_data: "RedisDatastructure") -> float:
+def calculate_weight(peer_data: "RedisDatastructure") -> float:
     """Calculate base priority score for a peer.
 
     Lower score = higher priority (for Redis ZSET ordering).
@@ -44,11 +44,7 @@ def rank_peers(
     peer_data_map: dict[str, dict],
     numwant: int,
 ) -> list[RankedPeer]:
-    """Rank peers by combined geo + BEP40 + activity score.
-
-    peer_pool: list of (peer_key, base_score) from Redis ZSET
-    peer_data_map: dict of peer_key -> parsed peer data dict
-    """
+    """Rank peers by combined geo + BEP40 + activity score."""
     if not peer_pool:
         return []
 
@@ -65,7 +61,6 @@ def rank_peers(
 
         geo_pen = geo_distance(requester_country, country)
         net_pen = bep40_proximity(requester_ip, peer_ip)
-
         combined = base_score + geo_pen + net_pen
 
         ranked.append(RankedPeer(

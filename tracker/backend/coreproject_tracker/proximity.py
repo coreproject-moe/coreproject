@@ -1,3 +1,9 @@
+"""BEP40 network proximity and geo distance scoring.
+
+Ported from inspirations/torrent bep40 implementation.
+Lower scores = closer proximity (better for peer ranking).
+"""
+
 import ipaddress
 import struct
 
@@ -53,16 +59,10 @@ def bep40_proximity(ip_a: str, ip_b: str) -> float:
 
     if ver_a == 4:
         mask_len = _ipv4_mask(bytes_a, bytes_b)
-        masked_a = bytes_a[:mask_len] + b"\x00" * (4 - mask_len)
-        masked_b = bytes_b[:mask_len] + b"\x00" * (4 - mask_len)
     else:
         mask_len = _ipv6_mask(bytes_a, bytes_b)
-        masked_a = bytes_a[:mask_len] + b"\x00" * (16 - mask_len)
-        masked_b = bytes_b[:mask_len] + b"\x00" * (16 - mask_len)
 
     # Normalize: more mask bytes = closer = lower score
-    # mask_len 4 (IPv4 full) or 16 (IPv6 full) -> 0.0
-    # mask_len 0 -> 10.0
     if ver_a == 4:
         return max(0.0, 10.0 - (mask_len / 4) * 10.0)
     return max(0.0, 10.0 - (mask_len / 16) * 10.0)

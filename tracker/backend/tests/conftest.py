@@ -1,4 +1,5 @@
-import asyncio
+"""Pytest configuration and shared fixtures."""
+
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -6,57 +7,50 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import redis.asyncio
 
-# Ensure the backend package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+
 # ---------------------------------------------------------------------------
-# Test data factories
+# Test data helpers
 # ---------------------------------------------------------------------------
 
-def make_info_hash(length: int = 20) -> bytes:
-    """Create a valid info_hash of the given length (default SHA-1: 20 bytes)."""
+
+def test_info_hash_bytes(length: int = 20) -> bytes:
+    """Create valid info_hash bytes (SHA-1: 20 bytes, SHA-256: 32 bytes)."""
     return bytes(range(length))
 
 
-def make_peer_id() -> str:
-    """Create a valid 20-byte peer_id as latin-1 string."""
-    return "-".join([f"{i:02x}" for i in range(20)])
-
-
-def make_valid_ipv4() -> str:
-    return "192.168.1.1"
-
-
-def make_valid_ipv6() -> str:
-    return "2001:db8::1"
+def test_peer_id_string() -> str:
+    """Create a valid 20-char peer_id."""
+    return "-".join(f"{i:02x}" for i in range(20))
 
 
 # ---------------------------------------------------------------------------
 # Redis fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def redis_uri():
-    """Redis URI for testing - uses localhost:6379 or env override."""
+def redis_connection_uri():
     return os.environ.get("REDIS_URI", "redis://localhost:6379/0")
 
 
 @pytest.fixture
-async def redis_connection(redis_uri):
-    """Real Redis connection for integration tests. Skipped if Redis unavailable."""
+async def real_redis(redis_connection_uri):
+    """Real Redis for integration tests. Skips if unavailable."""
     try:
-        r = redis.asyncio.from_url(redis_uri)
-        await r.ping()
-        await r.flushdb()
-        yield r
-        await r.flushdb()
-        await r.aclose()
+        client = redis.asyncio.from_url(redis_connection_uri)
+        await client.ping()
+        await client.flushdb()
+        yield client
+        await client.flushdb()
+        await client.aclose()
     except ConnectionError:
-        pytest.skip("Redis not available for integration tests")
+        pytest.skip("Redis not available")
 
 
 @pytest.fixture
-def mock_redis():
+def fake_redis():
     """Mock Redis async client for unit tests."""
     mock = AsyncMock(spec=redis.asyncio.Redis)
     mock.ping.return_value = True
@@ -72,21 +66,16 @@ def mock_redis():
 
 
 @pytest.fixture
-def mock_redis_pipeline(mock_redis):
-    """Mock Redis pipeline."""
-    pipeline = AsyncMock()
-    pipeline.execute = AsyncMock(return_value=[0, 0, 0, 0, 0])
-    mock_redis.pipeline.return_value = pipeline
-    return pipeline
+def fake_redis_pipe(fake_redis):
+    pipe = AsyncMock()
+    pipe.execute = AsyncMock(return_value=[0, 0, 0, 0, 0])
+    fake_redis.pipeline.return_value = pipe
+    return pipe
 
-
-# ---------------------------------------------------------------------------
-# Redis singleton patching
-# ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def reset_redis_singleton():
-    """Ensure Redis singleton is clean between tests."""
+def clear_redis_singleton():
+    """Reset Redis singleton between tests."""
     from coreproject_tracker.singletons.redis import RedisHandler
     RedisHandler._connection = None
     yield
@@ -94,168 +83,123 @@ def reset_redis_singleton():
 
 
 # ---------------------------------------------------------------------------
-# GeoIP fixtures
+# Geo fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def mock_geoip_available():
-    """Mock GeoIP as unavailable (no database)."""
-    with patch("coreproject_tracker.geo._geo_available", False):
-        with patch("coreproject_tracker.geo._geo_reader", None):
+def disable_geoip():
+    """Mock geo as unavailable (no CSV loaded)."""
+    with patch("coreproject_tracker.geo._geo_loaded", False):
+        with patch("coreproject_tracker.geo._geo_loading", False):
             yield
 
 
 @pytest.fixture
-def mock_geoip_reader():
-    """Mock GeoIP reader that returns country codes."""
-    mock_reader = MagicMock()
-    mock_response = MagicMock()
-    mock_response.country.iso_code = "US"
-    mock_reader.country.return_value = mock_response
-    mock_reader.close = MagicMock()
-    return mock_reader
-
-
-# ---------------------------------------------------------------------------
-# Blocklist fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def temp_blocklist_file(tmp_path):
-    """Create a temporary blocklist file."""
-    blocklist = tmp_path / "blocklist.txt"
-    blocklist.write_text("10.0.0.0/8\n172.16.0.0/12\n# comment\n\n192.168.1.100\n")
-    return str(blocklist)
+def enable_geoip():
+    """Mock geo as available."""
+    with patch("coreproject_tracker.geo._geo_loaded", True):
+        yield
 
 
 # ---------------------------------------------------------------------------
 # Quart app fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-async def quart_app(mock_redis, mock_geoip_available, redis_uri):
-    """Create a Quart test app with mocked Redis."""
-    from coreproject_tracker.app import make_app
 
-    with patch("coreproject_tracker.singletons.redis.RedisHandler._connection", mock_redis):
-        app = make_app()
+@pytest.fixture
+async def test_app(fake_redis, disable_geoip):
+    """Quart test app with mocked Redis."""
+    from coreproject_tracker.app import create_quart_app
+    from coreproject_tracker.singletons.redis import RedisHandler
+
+    with patch.object(RedisHandler, "_connection", fake_redis):
+        app = create_quart_app()
         yield app
 
 
 @pytest.fixture
-async def quart_test_client(quart_app):
-    """Quart test client for HTTP endpoint testing."""
-    async with quart_app.test_app():
-        client = quart_app.test_client()
+async def http_client(test_app):
+    """Test client for HTTP endpoints."""
+    async with test_app.test_app():
+        client = test_app.test_client()
         yield client
 
 
 @pytest.fixture
-async def live_quart_app(redis_connection, mock_geoip_available):
-    """Create a Quart test app with real Redis for integration tests."""
-    from coreproject_tracker.app import make_app
+async def live_test_app(real_redis, disable_geoip):
+    """Quart test app with real Redis."""
+    from coreproject_tracker.app import create_quart_app
     from coreproject_tracker.singletons.redis import RedisHandler
 
-    RedisHandler._connection = redis_connection
-    app = make_app()
+    RedisHandler._connection = real_redis
+    app = create_quart_app()
     async with app.test_app():
         yield app
     RedisHandler._connection = None
 
 
 @pytest.fixture
-async def live_quart_test_client(live_quart_app):
-    """Quart test client with real Redis for integration tests."""
-    async with live_quart_app.test_app():
-        client = live_quart_app.test_client()
+async def live_http_client(live_test_app):
+    """Test client with real Redis."""
+    async with live_test_app.test_app():
+        client = live_test_app.test_client()
         yield client
 
 
 # ---------------------------------------------------------------------------
-# UDP server fixtures
+# UDP packet fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def connection_id_bytes():
-    """The expected CONNECTION_ID as 8 bytes."""
+def udp_connection_id():
     from coreproject_tracker.constants import CONNECTION_ID
     return CONNECTION_ID.to_bytes(8, "big")
 
 
 @pytest.fixture
-def sample_udp_connect_packet(connection_id_bytes):
-    """A valid UDP CONNECT request packet."""
+def udp_connect_packet(udp_connection_id):
     import struct
-    return b"".join([
-        connection_id_bytes,
-        struct.pack(">I", 0),       # action: CONNECT
-        struct.pack(">I", 12345),   # transaction_id
-    ])
+    return udp_connection_id + struct.pack(">I", 0) + struct.pack(">I", 12345)
 
 
 @pytest.fixture
-def sample_udp_announce_packet(connection_id_bytes):
-    """A valid UDP ANNOUNCE request packet (98 bytes)."""
+def udp_announce_packet(udp_connection_id):
     import struct
-    info_hash = make_info_hash()
-    peer_id = bytes(range(20))
-    return b"".join([
-        connection_id_bytes,        # 0-7: connection_id
-        struct.pack(">I", 1),       # 8-11: action ANNOUNCE
-        struct.pack(">I", 54321),   # 12-15: transaction_id
-        info_hash,                  # 16-35: info_hash
-        peer_id,                    # 36-55: peer_id
-        struct.pack(">Q", 0),       # 56-63: downloaded
-        struct.pack(">Q", 1000),    # 64-71: left
-        struct.pack(">Q", 500),     # 72-79: uploaded
-        struct.pack(">I", 0),       # 80-83: event (0=started)
-        struct.pack(">I", 0),       # 84-87: ip (0=fill from sender)
-        struct.pack(">I", 1),       # 88-91: key
-        struct.pack(">I", 50),      # 92-95: numwant
-        struct.pack(">H", 6881),    # 96-97: port
-    ])
+    ih = test_info_hash_bytes()
+    pid = bytes(range(20))
+    return (
+        udp_connection_id
+        + struct.pack(">I", 1)
+        + struct.pack(">I", 54321)
+        + ih
+        + pid
+        + struct.pack(">Q", 0)
+        + struct.pack(">Q", 1000)
+        + struct.pack(">Q", 500)
+        + struct.pack(">I", 0)
+        + struct.pack(">I", 0)
+        + struct.pack(">I", 1)
+        + struct.pack(">I", 50)
+        + struct.pack(">H", 6881)
+    )
 
 
 @pytest.fixture
-def sample_udp_scrape_packet(connection_id_bytes):
-    """A valid UDP SCRAPE request packet."""
+def udp_scrape_packet(udp_connection_id):
     import struct
-    info_hash = make_info_hash()
-    return b"".join([
-        connection_id_bytes,        # 0-7: connection_id
-        struct.pack(">I", 2),       # 8-11: action SCRAPE
-        struct.pack(">I", 99999),   # 12-15: transaction_id
-        info_hash,                  # 16-35: info_hash
-    ])
+    ih = test_info_hash_bytes()
+    return udp_connection_id + struct.pack(">I", 2) + struct.pack(">I", 99999) + ih
 
 
 # ---------------------------------------------------------------------------
-# WebSocket fixtures
+# Environment fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
-def ws_announce_message():
-    """A valid WebSocket announce message."""
-    return {
-        "info_hash": "a" * 40,  # hex-encoded 20 bytes
-        "action": "announce",
-        "peer_id": "b" * 40,    # hex-encoded 20 bytes
-        "ip": "192.168.1.1",
-        "port": 6881,
-        "addr": "192.168.1.1:6881",
-        "numwant": 50,
-        "left": 1000,
-        "uploaded": 500,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Environment fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def tracker_env():
-    """Set tracker environment variables for testing."""
+def tracker_env_vars():
     env = {
         "REDIS_HOST": "localhost",
         "REDIS_PORT": "6379",
@@ -267,18 +211,17 @@ def tracker_env():
     old = dict(os.environ)
     os.environ.update(env)
     yield env
-    # Restore
     for key in env:
         os.environ.pop(key, None)
     os.environ.update(old)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# bencode helper
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
-def bencode():
-    """bencodepy encode/decode helpers."""
+def bencode_tools():
     import bencodepy
     return {"encode": bencodepy.bencode, "decode": bencodepy.bdecode}

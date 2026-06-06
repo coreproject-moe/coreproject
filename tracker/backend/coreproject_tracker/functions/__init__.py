@@ -20,6 +20,7 @@ from .ip import (
     convert_ipv4_coded_ipv6_to_ipv4 as convert_ipv4_coded_ipv6_to_ipv4,
     convert_str_to_ip_object as convert_str_to_ip_object,
 )
+from .peers import select_peers as select_peers
 from .redis import (
     get_all_hash_keys as get_all_hash_keys,
     hdel as hdel,
@@ -34,8 +35,7 @@ from .redis import (
     zrem as zrem,
 )
 from .weight import (
-    calculate_base_weight as calculate_base_weight,
     RankedPeer as RankedPeer,
+    calculate_weight as calculate_weight,
     rank_peers as rank_peers,
 )
-from .peers import select_peers as select_peers

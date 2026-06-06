@@ -9,11 +9,10 @@ dependencies = [
     "attrs>=25.1.0",
     "bencode-py>=4.0.0",
     "flask-orjson>=2.0.0; platform.python_implementation == 'CPython'",
-    "geoip2>=4.8.0",
     "hypercorn>=0.17.3",
     "quart>=0.20.0",
     "quart-cors>=0.8.0",
-    "redis[hiredis]>=7.4.0",
+    "redis[hiredis]>=8.0.0",
     "uvloop>=0.21.0; sys_platform == 'linux'",
 ]
 
@@ -29,7 +28,7 @@ dev = [
     "pyrefly>=1.0.0",
 ]
 lint = [
-    "ruff>=0.15.14",
+    "ruff>=0.15.15",
 ]
 test = [
     "pytest>=8.3.0",

@@ -30,8 +30,43 @@ from coreproject_tracker.validators import check_rate_limit, is_blocked
 http_blueprint = Blueprint("http", __name__)
 
 
-async def get_ip():
-    return request.headers.get("X-Real-IP", request.remote_addr)
+async def get_ip() -> str:
+    """Extract real client IP from various reverse proxy headers.
+
+    Supports: nginx (X-Real-IP, X-Forwarded-For), Caddy (Forwarded),
+    Apache (X-Forwarded-For), HAProxy (X-Forwarded-For),
+    Cloudflare (CF-Connecting-IP, True-Client-IP),
+    Fly.io (Fly-Client-IP), Plesk (X-Cluster-Client-IP).
+
+    Returns the first (client) IP from comma-separated chains to prevent spoofing.
+    """
+    # Try each proxy header in priority order
+    for header in (
+        "X-Real-IP",           # nginx
+        "CF-Connecting-IP",   # Cloudflare
+        "True-Client-IP",     # Cloudflare/Akamai
+        "X-Cluster-Client-IP",  # Plesk
+        "Fly-Client-IP",      # Fly.io
+        "X-Forwarded-For",    # nginx/Apache/HAProxy/Caddy
+        "Forwarded",          # RFC 7239 (Caddy/Apache)
+    ):
+        value = request.headers.get(header)
+        if value:
+            # Handle "Forwarded: for=1.2.3.4" format (RFC 7239)
+            if header == "Forwarded":
+                # for=1.2.3.4,for=5.6.7.8
+                for part in value.split(","):
+                    part = part.strip()
+                    if part.startswith("for="):
+                        ip = part.split("=", 1)[1].strip()
+                        return ip or request.remote_addr or "0.0.0.0"
+            # Handle comma-separated chains (X-Forwarded-For: client, proxy1, proxy2)
+            # First IP = original client
+            elif "," in value:
+                return value.split(",")[0].strip()
+            return value.strip()
+
+    return request.remote_addr or "0.0.0.0"
 
 
 @http_blueprint.route("/")
@@ -173,9 +208,6 @@ async def scrape_endpoint():
 
     info_hash = info_hash_raw if isinstance(info_hash_raw, str) else info_hash_raw.hex()
 
-    seeders = 0
-    leechers = 0
-
     # Use select_peers with large numwant to get all peers for scrape
     ranked_peers = await select_peers(
         requester_ip=ip,
@@ -231,3 +263,81 @@ async def api_endpoint():
         "redis_data": result,
     }
     return jsonify(data), HTTPStatus.OK
+
+
+@http_blueprint.route("/api/geo")
+async def geo_api_endpoint():
+    """Return geo database stats for the frontend."""
+    from coreproject_tracker.geo import get_geo_stats
+
+    stats = get_geo_stats()
+    return jsonify(stats), HTTPStatus.OK
+
+
+@http_blueprint.route("/api/tracker_data")
+async def tracker_data_endpoint():
+    """Return all swarm peer data with country codes for the radar map.
+
+    Frontend uses this to render connection lines on the map.
+    Heavily cached in Redis - geo lookups use TTL cache.
+    """
+    from coreproject_tracker.geo import resolve_countries_batch
+
+    r = get_redis()
+
+    # Get all hash keys (swarms)
+    hash_keys = await get_all_hash_keys()
+
+    # Decode all hash data
+    pipe = await r.pipeline()
+    for hash_key in hash_keys:
+        await pipe.hgetall(hash_key)
+    raw_hash_data = await pipe.execute()
+
+    decoded = await decode_dictionary(dict(zip(hash_keys, raw_hash_data)))
+
+    # Collect all unique IPs for batch geo resolution
+    all_ips: list[str] = []
+    for swarm_key, peers in decoded.items():
+        if not isinstance(peers, dict):
+            continue
+        for peer_key, peer_json_str in peers.items():
+            if not isinstance(peer_json_str, dict):
+                continue
+            ip = peer_json_str.get("peer_ip", "")
+            if ip and ip not in all_ips:
+                all_ips.append(ip)
+
+    # Batch resolve all IPs to countries (Redis-cached)
+    country_map = await resolve_countries_batch(all_ips)
+
+    # Build response: list of swarms with peer locations
+    swarms = []
+    total_peers = 0
+    for swarm_key, peers in decoded.items():
+        if not isinstance(peers, dict):
+            continue
+        peer_list = []
+        for peer_key, peer_data in peers.items():
+            if not isinstance(peer_data, dict):
+                continue
+            ip = peer_data.get("peer_ip", "")
+            peer_list.append({
+                "ip": ip,
+                "port": peer_data.get("port", 0),
+                "country": country_map.get(ip) or peer_data.get("country", ""),
+                "continent": "",
+                "seeders": 1 if peer_data.get("left", 1) == 0 else 0,
+            })
+            total_peers += 1
+        swarms.append({
+            "info_hash": swarm_key.replace("http_udp:", "").replace("websocket:", ""),
+            "peers": peer_list,
+            "peer_count": len(peer_list),
+        })
+
+    return jsonify({
+        "swarms": swarms,
+        "total_peers": total_peers,
+        "total_swarms": len(swarms),
+    }), HTTPStatus.OK

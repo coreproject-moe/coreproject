@@ -5,7 +5,7 @@ from coreproject_tracker.constants import PEER_TTL, WEBSOCKET_PEER_TTL
 from coreproject_tracker.converters import convert_str_int_to_float
 from coreproject_tracker.enums import REDIS_NAMESPACE_ENUM
 from coreproject_tracker.functions import (
-    calculate_base_weight,
+    calculate_weight,
     hset,
     save_peer_pipeline,
     zadd,
@@ -45,7 +45,7 @@ class RedisDatastructure:
             self.info_hash,
             peer_key,
             peer_json,
-            calculate_base_weight(self),
+            calculate_weight(self),
             expire_time,
             redis_namespace,
         )

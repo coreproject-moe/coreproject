@@ -150,15 +150,15 @@ async def _handle_announce(
 
 async def _handle_scrape(data: UdpDatastructure, info_hashes: list[bytes]) -> bytes:
     torrents = bytearray()
-    for ih in info_hashes:
-        ih_hex = ih.hex()
+    for info_hash_bytes in info_hashes:
+        info_hash_hex = info_hash_bytes.hex()
         seeders = 0
         leechers = 0
 
         # Use select_peers with large numwant to get all peers for scrape
         ranked_peers = await select_peers(
             requester_ip="0.0.0.0",
-            info_hash=ih_hex,
+            info_hash=info_hash_hex,
             numwant=999999,
             namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
         )
@@ -168,7 +168,7 @@ async def _handle_scrape(data: UdpDatastructure, info_hashes: list[bytes]) -> by
             else:
                 leechers += 1
 
-        ih_bencoded = f"{len(ih_hex)}:{ih_hex}".encode()
+        ih_bencoded = f"{len(info_hash_hex)}:{info_hash_hex}".encode()
         stats = f"l5:completei{seeders}e8:incompletei{leechers}ee"
         torrents.extend(ih_bencoded + stats.encode())
 

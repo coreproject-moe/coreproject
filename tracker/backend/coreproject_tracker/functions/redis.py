@@ -153,10 +153,7 @@ async def zrandmember_with_scores(
     count: int,
     namespace: REDIS_NAMESPACE_ENUM,
 ) -> list[tuple[str, float]]:
-    """Get random members with their base scores from the sorted set.
-
-    Returns list of (member, score) tuples for ranking.
-    """
+    """Get random members with their base scores from the sorted set."""
     r = get_redis()
     namespaced_key = _ns_key_z(namespace, hash_key)
     members = await r.zrandmember(namespaced_key, count, withscores=True)

@@ -1,3 +1,5 @@
+"""Geo-aware peer selection with oversampling + ranking."""
+
 import json
 
 from coreproject_tracker.constants import DEFAULT_ANNOUNCE_PEERS, MAX_ANNOUNCE_PEERS
@@ -7,7 +9,6 @@ from coreproject_tracker.functions.weight import RankedPeer, rank_peers
 from coreproject_tracker.geo import resolve_country
 
 # Oversampling multiplier: fetch N*numwant peers, rank them, return top numwant.
-# Gives a sorting window while bounding Redis read cost.
 PEER_POOL_MULTIPLIER = 3
 
 
@@ -21,8 +22,6 @@ async def select_peers(
 
     Pipeline: resolve requester country -> fetch peer pool with scores ->
     fetch peer data -> rank by geo+BEP40+activity -> return top N.
-
-    All Redis calls use pipelining where possible to minimize round-trips.
     """
     numwant = min(max(numwant, DEFAULT_ANNOUNCE_PEERS), MAX_ANNOUNCE_PEERS)
 
@@ -38,7 +37,7 @@ async def select_peers(
     if not peer_pool:
         return []
 
-    # Fetch peer data via hmget (single Redis call for all peers)
+    # Fetch peer data via hmget
     peer_keys = [key for key, _ in peer_pool]
     peer_json_list = await hmget(info_hash, peer_keys, namespace)
 
