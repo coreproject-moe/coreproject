@@ -1,0 +1,136 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "tracker/backend/**"
+      - ".github/workflows/backend-test.yml"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - "tracker/backend/**"
+      - ".github/workflows/backend-test.yml"
+
+jobs:
+  unit-tests:
+    name: Unit Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.14"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+        working-directory: tracker/backend
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit -v --no-cov
+        working-directory: tracker/backend
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4.3-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+        working-directory: tracker/backend
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration -v --no-cov -m integration
+        working-directory: tracker/backend
+        env:
+          REDIS_URI: redis://localhost:6379/0
+
+  compatibility-tests:
+    name: BEP Protocol Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+        working-directory: tracker/backend
+
+      - name: Run compatibility tests
+        run: uv run pytest tests/compatibility -v --no-cov
+        working-directory: tracker/backend
+
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4.3-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+        working-directory: tracker/backend
+
+      - name: Run full test suite with coverage
+        run: uv run pytest tests/ -v
+        working-directory: tracker/backend
+        env:
+          REDIS_URI: redis://localhost:6379/0
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: tracker/backend/coverage.xml
