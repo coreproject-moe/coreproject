@@ -4,7 +4,11 @@ import json
 
 from coreproject_tracker.constants import DEFAULT_ANNOUNCE_PEERS, MAX_ANNOUNCE_PEERS
 from coreproject_tracker.enums import REDIS_NAMESPACE_ENUM
-from coreproject_tracker.functions import hmget, zcard, zrandmember_with_scores
+from coreproject_tracker.functions.redis import (
+    hmget,
+    zcard,
+    zrandmember_with_scores,
+)
 from coreproject_tracker.functions.weight import RankedPeer, rank_peers
 from coreproject_tracker.geo import resolve_country
 

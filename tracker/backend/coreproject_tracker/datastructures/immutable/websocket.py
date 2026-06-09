@@ -39,6 +39,7 @@ class WebsocketDatastructure:
     # Optional
     event: EVENT_NAMES = field(default=None)
     uploaded: int = field(default=None)
+    private: bool = field(default=False, converter=bool)
     answer: str = field(default=None)
     to_peer_id: bytes | None = field(
         default=None,

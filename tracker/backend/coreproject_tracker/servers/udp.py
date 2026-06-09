@@ -207,6 +207,16 @@ async def run_udp_server(server_host: str, server_port: int):
                 }
                 data = UdpDatastructure(**_data)
 
+                # Validate action code is in valid range [0,3]
+                if data.action > ACTIONS.ERROR:
+                    error_packet = b"".join([
+                        to_uint32(ACTIONS.ERROR),
+                        to_uint32(data.transaction_id),
+                        b"Invalid action code",
+                    ])
+                    await udp.sendto(error_packet, host, port)
+                    continue
+
                 if is_blocked(host):
                     continue
                 if not await check_rate_limit(host):

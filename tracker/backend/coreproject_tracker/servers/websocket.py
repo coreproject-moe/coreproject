@@ -18,6 +18,11 @@ from coreproject_tracker.functions import (
     hex_str_to_bin_str,
     select_peers,
 )
+from coreproject_tracker.bep.bep27 import (
+    AnnounceParams,
+    TorrentInfo,
+    validate_private_torrent_announce,
+)
 from coreproject_tracker.geo import resolve_country
 from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
@@ -51,6 +56,7 @@ async def websocket_announce_handler():
             "uploaded": message.get("uploaded"),
             "offers": message.get("offers", []),
             "left": message.get("left"),
+            "private": message.get("private", False),
         }
 
         if message.get("answer"):
@@ -119,6 +125,23 @@ async def websocket_announce_handler():
             )
             await peer_record.save()
 
+            # BEP27: validate private torrent, skip offers if private
+            is_private_torrent = False
+            torrent_info = TorrentInfo(private=peer_request.private)
+            ws_params = AnnounceParams(
+                use_pex=len(peer_request.offers) > 0
+            )
+            violations = validate_private_torrent_announce(
+                torrent_info, ws_params
+            )
+            if violations:
+                is_private_torrent = True
+                logging.warning(
+                    "WebSocket private torrent violation %s: %s",
+                    peer_request.info_hash,
+                    "; ".join(violations),
+                )
+
             # Geo-aware peer selection with oversampling + ranking
             ranked_peers = await select_peers(
                 requester_ip=peer_request.ip,
@@ -155,8 +178,8 @@ async def websocket_announce_handler():
             if not peer_request.answer:
                 await websocket.send_json(response_payload)
 
-            # Distribute WebRTC offers to ranked peers
-            if offers := peer_request.offers:
+            # Distribute WebRTC offers to ranked peers (skip for private torrents)
+            if not is_private_torrent and (offers := peer_request.offers):
                 for ranked_peer in ranked_peers:
                     target_peer_id = ranked_peer.peer_id
                     for offer in offers:

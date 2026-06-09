@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from coreproject_tracker.datastructures import RedisDatastructure
 
-from coreproject_tracker.proximity import bep40_proximity, geo_distance
+from coreproject_tracker.bep.bep40 import bep40_priority
+from coreproject_tracker.proximity import geo_distance
 
 
 @dataclass(slots=True)
@@ -60,7 +61,7 @@ def rank_peers(
             continue
 
         geo_pen = geo_distance(requester_country, country)
-        net_pen = bep40_proximity(requester_ip, peer_ip)
+        net_pen = (bep40_priority(requester_ip, peer_ip, 0, port) & 0xFFFFFFFF) / 0xFFFFFFFF * 10.0
         combined = base_score + geo_pen + net_pen
 
         ranked.append(RankedPeer(

@@ -27,6 +27,12 @@ from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
 from coreproject_tracker.validators import check_rate_limit, is_blocked
 
+from coreproject_tracker.bep.bep27 import (
+    AnnounceParams,
+    TorrentInfo,
+    validate_private_torrent_announce,
+)
+
 http_blueprint = Blueprint("http", __name__)
 
 
@@ -103,6 +109,7 @@ async def http_endpoint():
             "numwant": request.args.get("numwant"),
             "peer_ip": ip,
             "peer_id": request.args.get("peer_id"),
+            "private": request.args.get("private", "0"),
         }
         if event := request.args.get("event"):
             _data |= {"event_name": convert_event_name_to_event_enum(event)}
@@ -134,6 +141,18 @@ async def http_endpoint():
     )
 
     await redis_storage.save()
+
+    # BEP27: validate private torrent announce
+    warning_message = None
+    torrent_info = TorrentInfo(private=data.private)
+    violations = validate_private_torrent_announce(
+        torrent_info, AnnounceParams()
+    )
+    if violations:
+        warning_message = "; ".join(violations)
+        logging.warning(
+            "Private torrent violation %s: %s", data.info_hash, warning_message
+        )
 
     # Geo-aware peer selection with oversampling + ranking
     ranked_peers = await select_peers(
@@ -183,6 +202,8 @@ async def http_endpoint():
         "complete": seeders.value,
         "incomplete": leechers.value,
     }
+    if warning_message:
+        output["warning message"] = warning_message
     logging.info(
         f"HTTP announce {data.info_hash} event={data.event_name} "
         f"v4={len(peers.value)} v6={len(peers6.value)} "
