@@ -16,9 +16,14 @@ from coreproject_tracker.functions import (
     convert_event_name_to_event_enum,
     hdel,
     hex_str_to_bin_str,
-    hmget,
-    zrandmember,
+    select_peers,
 )
+from coreproject_tracker.bep.bep27 import (
+    AnnounceParams,
+    TorrentInfo,
+    validate_private_torrent_announce,
+)
+from coreproject_tracker.geo import resolve_country
 from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
 
@@ -26,172 +31,219 @@ ws_blueprint = Blueprint("websocket", __name__)
 
 
 @ws_blueprint.websocket("/announce")
-async def ws():
+async def websocket_announce_handler():
+    """WebSocket announce endpoint for WebRTC peer-to-peer.
+
+    Handles peer registration, geo-aware peer selection, and WebRTC
+    offer/answer exchange via Redis pub/sub.
+    """
+
     @copy_current_websocket_context
-    async def parse_websocket():
-        initial_message = await websocket.receive_json()
+    async def parse_incoming_message() -> WebsocketDatastructure:
+        """Parse and validate an incoming WebSocket message."""
+        message = await websocket.receive_json()
         scoped_client_ip, client_port = websocket.scope.get("client")  # type: ignore
         client_ip = websocket.headers.get("X-Real-IP", scoped_client_ip)
 
-        _data = {
+        payload = {
             "ip": client_ip,
             "port": client_port,
             "addr": f"{client_ip}:{client_port}",
-            "info_hash_raw": initial_message["info_hash"],
-            "action": initial_message["action"],
-            "peer_id": initial_message["peer_id"],
-            "numwant": initial_message.get("numwant"),
-            "uploaded": initial_message.get("uploaded"),
-            "offers": initial_message.get("offers", []),
-            "left": initial_message.get("left"),
+            "info_hash_raw": message["info_hash"],
+            "action": message["action"],
+            "peer_id": message["peer_id"],
+            "numwant": message.get("numwant"),
+            "uploaded": message.get("uploaded"),
+            "offers": message.get("offers", []),
+            "left": message.get("left"),
+            "private": message.get("private", False),
         }
 
-        if initial_message.get("answer"):
-            _data |= {
-                "answer": initial_message["answer"],
-                "to_peer_id": initial_message["to_peer_id"],
-                "offer_id": initial_message["offer_id"],
+        if message.get("answer"):
+            payload |= {
+                "answer": message["answer"],
+                "to_peer_id": message["to_peer_id"],
+                "offer_id": message["offer_id"],
             }
 
-        if event := initial_message.get("event"):
-            _data |= {"event": convert_event_name_to_event_enum(event)}
+        if event := message.get("event"):
+            payload |= {"event": convert_event_name_to_event_enum(event)}
 
-        return WebsocketDatastructure(**_data)
+        return WebsocketDatastructure(**payload)
 
     @copy_current_websocket_context
-    async def listen_pubsub():
+    async def listen_incoming_pubsub():
+        """Listen for messages published to this peer's Redis channel."""
         while True:
-            message = await pubsub.get_message(
+            redis_message = await pubsub.get_message(
                 ignore_subscribe_messages=True, timeout=1.0
             )
-            if message and message["type"] == "message":
-                await websocket.send_json(json.loads(message["data"]))
+            if redis_message and redis_message["type"] == "message":
+                await websocket.send_json(json.loads(redis_message["data"]))
 
-    data: WebsocketDatastructure = await parse_websocket()
+    peer_request: WebsocketDatastructure = await parse_incoming_message()
 
-    task: asyncio.Task | None = None
-    redis = get_redis()
-    pubsub = redis.pubsub()
+    pubsub_listener_task: asyncio.Task | None = None
+    redis_connection = get_redis()
+    pubsub = redis_connection.pubsub()
 
-    if not data.peer_id:
-        raise ValueError("WEBSOCKET: `peer_id` is required for subscription to redis")
+    if not peer_request.peer_id:
+        raise ValueError(
+            "WEBSOCKET: `peer_id` is required for subscription to redis"
+        )
 
-    await pubsub.subscribe(f"peer:{data.peer_id.hex()}")
+    await pubsub.subscribe(f"peer:{peer_request.peer_id.hex()}")
 
     try:
-        task = asyncio.create_task(listen_pubsub())
+        pubsub_listener_task = asyncio.create_task(listen_incoming_pubsub())
 
         while True:
-            if data.event == EVENT_NAMES.STOP:
-                await websocket.close(1000, "Server is received `stop` event")
+            if peer_request.event == EVENT_NAMES.STOP:
+                await websocket.close(1000, "Server received `stop` event")
                 break
 
-            response = {"action": data.action}
-            if not data.peer_id:
-                raise ValueError("WEBSOCKET: `peer_id` is required for saving to redis")
+            response_payload = {"action": peer_request.action}
 
-            redis_storage = RedisDatastructure(
-                info_hash=data.info_hash,
+            if not peer_request.peer_id:
+                raise ValueError(
+                    "WEBSOCKET: `peer_id` is required for saving to redis"
+                )
+
+            # Resolve country (non-blocking, cached in Redis)
+            peer_country = await resolve_country(peer_request.ip)
+
+            peer_record = RedisDatastructure(
+                info_hash=peer_request.info_hash,
                 type="websocket",
-                peer_id=data.peer_id.hex(),
-                peer_ip=data.ip,
-                port=data.port,
-                left=int(data.left) if data.left is not None else None,
+                peer_id=peer_request.peer_id.hex(),
+                peer_ip=peer_request.ip,
+                port=peer_request.port,
+                left=int(peer_request.left)
+                if peer_request.left is not None
+                else None,
+                country=peer_country,
             )
-            await redis_storage.save()
+            await peer_record.save()
 
-            seeders = MutableBox[int](0)
-            leechers = MutableBox[int](0)
+            # BEP27: validate private torrent, skip offers if private
+            is_private_torrent = False
+            torrent_info = TorrentInfo(private=peer_request.private)
+            ws_params = AnnounceParams(
+                use_pex=len(peer_request.offers) > 0
+            )
+            violations = validate_private_torrent_announce(
+                torrent_info, ws_params
+            )
+            if violations:
+                is_private_torrent = True
+                logging.warning(
+                    "WebSocket private torrent violation %s: %s",
+                    peer_request.info_hash,
+                    "; ".join(violations),
+                )
 
-            random_peer_keys = await zrandmember(
-                hash_key=data.info_hash,
-                numwant=data.numwant,
+            # Geo-aware peer selection with oversampling + ranking
+            ranked_peers = await select_peers(
+                requester_ip=peer_request.ip,
+                info_hash=peer_request.info_hash,
+                numwant=peer_request.numwant,
                 namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
             )
-            peer_json_list = await hmget(
-                hash_key=data.info_hash,
-                fields=random_peer_keys,
-                namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
-            )
 
-            for peer in peer_json_list:
-                if not peer:
-                    continue
+            seeder_count = MutableBox[int](0)
+            leecher_count = MutableBox[int](0)
+
+            for ranked_peer in ranked_peers:
                 try:
-                    with rollback_on_exception(seeders, leechers):
-                        peer_info = RedisDatastructure(**json.loads(peer))
-                        if peer_info.left == 0:
-                            seeders.value += 1
+                    with rollback_on_exception(seeder_count, leecher_count):
+                        if ranked_peer.left == 0:
+                            seeder_count.value += 1
                         else:
-                            leechers.value += 1
+                            leecher_count.value += 1
                 except TypeError:
                     pass
 
-            response |= {"completed": seeders.value, "incompleted": leechers.value}
+            response_payload |= {
+                "completed": seeder_count.value,
+                "incompleted": leecher_count.value,
+            }
 
-            if data.action == ACTIONS.ANNOUNCE:
-                response |= {
-                    "info_hash": hex_str_to_bin_str(data.info_hash),
+            if peer_request.action == ACTIONS.ANNOUNCE:
+                response_payload |= {
+                    "info_hash": hex_str_to_bin_str(peer_request.info_hash),
                     "interval": WEBSOCKET_INTERVAL,
                 }
-                await websocket.send_json(response)
+                await websocket.send_json(response_payload)
 
-            if not data.answer:
-                await websocket.send_json(response)
+            if not peer_request.answer:
+                await websocket.send_json(response_payload)
 
-            if offers := data.offers:
-                for value in peer_json_list:
-                    if value:
-                        peer_info = RedisDatastructure(**json.loads(value))
-                        for offer in offers:
-                            message = json.dumps({
-                                "action": "announce",
-                                "offer": offer["offer"],
-                                "offer_id": offer["offer_id"],
-                                "peer_id": bytes_to_bin_str(data.peer_id),
-                                "info_hash": hex_str_to_bin_str(data.info_hash),
-                            })
-                            await redis.publish(
-                                f"peer:{peer_info.peer_id}", message
-                            )
+            # Distribute WebRTC offers to ranked peers (skip for private torrents)
+            if not is_private_torrent and (offers := peer_request.offers):
+                for ranked_peer in ranked_peers:
+                    target_peer_id = ranked_peer.peer_id
+                    for offer in offers:
+                        offer_message = json.dumps({
+                            "action": "announce",
+                            "offer": offer["offer"],
+                            "offer_id": offer["offer_id"],
+                            "peer_id": bytes_to_bin_str(peer_request.peer_id),
+                            "info_hash": hex_str_to_bin_str(
+                                peer_request.info_hash
+                            ),
+                        })
+                        await redis_connection.publish(
+                            f"peer:{target_peer_id}", offer_message
+                        )
 
-            if data.answer:
-                if not data.to_peer_id:
+            # Forward WebRTC answer to target peer
+            if peer_request.answer:
+                if not peer_request.to_peer_id:
                     raise ValueError(
                         "WEBSOCKET: `to_peer_id` is required for answer"
                     )
-                message = json.dumps({
+                answer_message = json.dumps({
                     "action": "announce",
-                    "answer": data.answer,
-                    "offer_id": data.offer_id,
-                    "peer_id": bytes_to_bin_str(data.peer_id),
-                    "info_hash": hex_str_to_bin_str(data.info_hash),
+                    "answer": peer_request.answer,
+                    "offer_id": peer_request.offer_id,
+                    "peer_id": bytes_to_bin_str(peer_request.peer_id),
+                    "info_hash": hex_str_to_bin_str(peer_request.info_hash),
                 })
-                await redis.publish(
-                    f"peer:{data.to_peer_id.hex()}", message
+                await redis_connection.publish(
+                    f"peer:{peer_request.to_peer_id.hex()}", answer_message
                 )
 
             logging.info(
-                f"WebSocket announce {data.info_hash} event={data.event}"
+                "WebSocket announce %s event=%s",
+                peer_request.info_hash,
+                peer_request.event,
             )
 
-            data: WebsocketDatastructure = await parse_websocket()
+            peer_request: WebsocketDatastructure = (
+                await parse_incoming_message()
+            )
 
     except asyncio.CancelledError:
-        logging.info(f"WebSocket disconnected `{data.ip}:{data.port}`")
+        logging.info(
+            "WebSocket disconnected `%s:%s`",
+            peer_request.ip,
+            peer_request.port,
+        )
         raise
     finally:
-        if task:
-            task.cancel()
+        if pubsub_listener_task:
+            pubsub_listener_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await task
+                await pubsub_listener_task
 
         if pubsub:
-            if data.peer_id:
-                await pubsub.unsubscribe(f"peer:{data.peer_id.hex()}")
+            if peer_request.peer_id:
+                await pubsub.unsubscribe(
+                    f"peer:{peer_request.peer_id.hex()}"
+                )
                 await pubsub.close()
             await hdel(
-                data.info_hash,
-                data.addr,
+                peer_request.info_hash,
+                peer_request.addr,
                 namespace=REDIS_NAMESPACE_ENUM.WEBSOCKET,
             )

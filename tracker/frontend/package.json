@@ -17,8 +17,11 @@
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-slot": "^1.2.4",
+    "@types/geojson": "^7946.0.16",
+    "@types/maplibre-gl": "^1.13.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "maplibre-gl": "^5.24.0",
     "next": "16.2.7",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"

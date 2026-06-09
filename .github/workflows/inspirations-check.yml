@@ -1,0 +1,108 @@
+name: Inspirations Compatibility Check
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "tracker/inspirations/**"
+      - ".github/workflows/inspirations-check.yml"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - "tracker/inspirations/**"
+      - ".github/workflows/inspirations-check.yml"
+  schedule:
+    - cron: "0 6 * * 1"  # Weekly Monday 6am UTC
+
+jobs:
+  check-libtorrent:
+    name: Check libtorrent Tracker Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          depth: 0  # Need full history for inspirations
+
+      - name: Verify libtorrent tracker manager exists
+        run: |
+          test -f tracker/inspirations/libtorrent/src/tracker_manager.cpp
+          echo "libtorrent tracker_manager.cpp found"
+
+      - name: Check libtorrent HTTP tracker protocol
+        run: |
+          grep -l "http_tracker" tracker/inspirations/libtorrent/src/ || true
+          echo "libtorrent HTTP tracker protocol reference found"
+
+      - name: Check libtorrent UDP tracker protocol
+        run: |
+          grep -l "udp_tracker" tracker/inspirations/libtorrent/src/ || true
+          echo "libtorrent UDP tracker protocol reference found"
+
+  check-go-torrent:
+    name: Check Go torrent Tracker Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          depth: 0
+
+      - name: Verify Go torrent tracker server
+        run: |
+          test -f tracker/inspirations/torrent/tracker/server/server.go
+          echo "Go torrent tracker server found"
+
+      - name: Check Go torrent HTTP announce handler
+        run: |
+          grep -l "AnnounceHandler" tracker/inspirations/torrent/tracker/ || true
+          echo "Go torrent AnnounceHandler found"
+
+      - name: Check Go torrent UDP tracker
+        run: |
+          test -f tracker/inspirations/torrent/tracker/udp/server/server.go
+          echo "Go torrent UDP tracker server found"
+
+  check-webtorrent:
+    name: Check WebTorrent Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          depth: 0
+
+      - name: Verify WebTorrent exists
+        run: |
+          test -f tracker/inspirations/webtorrent/index.js
+          echo "WebTorrent entry point found"
+
+      - name: Check WebTorrent WebSocket protocol
+        run: |
+          grep -l "websocket" tracker/inspirations/webtorrent/ || true
+          echo "WebTorrent WebSocket protocol reference found"
+
+      - name: Check WebTorrent WebRTC support
+        run: |
+          grep -l "webrtc" tracker/inspirations/webtorrent/ || true
+          echo "WebTorrent WebRTC support found"
+
+  cross-reference-protocols:
+    name: Cross-Reference Protocol Implementations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          depth: 0
+
+      - name: Verify BEP15 UDP constants match
+        run: |
+          echo "Checking CONNECTION_ID alignment with BEP15"
+          grep -r "CONNECTION_ID" tracker/backend/coreproject_tracker/constants/
+
+      - name: Verify BEP3 HTTP announce params
+        run: |
+          echo "Checking HTTP announce parameter names"
+          grep -r "info_hash" tracker/backend/coreproject_tracker/servers/
+
+      - name: Verify bencode response format
+        run: |
+          echo "Checking bencode usage"
+          grep -r "bencodepy" tracker/backend/coreproject_tracker/

@@ -20,6 +20,7 @@ export function Navbar() {
 
   const buttonMapping = {
     dashboard: "/",
+    radar: "/radar",
     health: "/health",
   };
 

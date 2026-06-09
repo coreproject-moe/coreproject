@@ -1,0 +1,40 @@
+name: Backend Lint
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "tracker/backend/**"
+      - ".github/workflows/backend-lint.yml"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - "tracker/backend/**"
+      - ".github/workflows/backend-lint.yml"
+
+jobs:
+  ruff:
+    name: Ruff Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+        working-directory: tracker/backend
+
+      - name: Ruff check
+        run: uv run ruff check .
+        working-directory: tracker/backend
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+        working-directory: tracker/backend

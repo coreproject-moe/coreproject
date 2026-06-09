@@ -20,18 +20,59 @@ from coreproject_tracker.functions import (
     decode_dictionary,
     get_all_hash_keys,
     hdel,
-    hmget,
-    zrandmember,
+    select_peers,
 )
+from coreproject_tracker.geo import resolve_country
 from coreproject_tracker.singletons import get_redis
 from coreproject_tracker.transaction import rollback_on_exception
 from coreproject_tracker.validators import check_rate_limit, is_blocked
 
+from coreproject_tracker.bep.bep27 import (
+    AnnounceParams,
+    TorrentInfo,
+    validate_private_torrent_announce,
+)
+
 http_blueprint = Blueprint("http", __name__)
 
 
-async def get_ip():
-    return request.headers.get("X-Real-IP", request.remote_addr)
+async def get_ip() -> str:
+    """Extract real client IP from various reverse proxy headers.
+
+    Supports: nginx (X-Real-IP, X-Forwarded-For), Caddy (Forwarded),
+    Apache (X-Forwarded-For), HAProxy (X-Forwarded-For),
+    Cloudflare (CF-Connecting-IP, True-Client-IP),
+    Fly.io (Fly-Client-IP), Plesk (X-Cluster-Client-IP).
+
+    Returns the first (client) IP from comma-separated chains to prevent spoofing.
+    """
+    # Try each proxy header in priority order
+    for header in (
+        "X-Real-IP",           # nginx
+        "CF-Connecting-IP",   # Cloudflare
+        "True-Client-IP",     # Cloudflare/Akamai
+        "X-Cluster-Client-IP",  # Plesk
+        "Fly-Client-IP",      # Fly.io
+        "X-Forwarded-For",    # nginx/Apache/HAProxy/Caddy
+        "Forwarded",          # RFC 7239 (Caddy/Apache)
+    ):
+        value = request.headers.get(header)
+        if value:
+            # Handle "Forwarded: for=1.2.3.4" format (RFC 7239)
+            if header == "Forwarded":
+                # for=1.2.3.4,for=5.6.7.8
+                for part in value.split(","):
+                    part = part.strip()
+                    if part.startswith("for="):
+                        ip = part.split("=", 1)[1].strip()
+                        return ip or request.remote_addr or "0.0.0.0"
+            # Handle comma-separated chains (X-Forwarded-For: client, proxy1, proxy2)
+            # First IP = original client
+            elif "," in value:
+                return value.split(",")[0].strip()
+            return value.strip()
+
+    return request.remote_addr or "0.0.0.0"
 
 
 @http_blueprint.route("/")
@@ -68,6 +109,7 @@ async def http_endpoint():
             "numwant": request.args.get("numwant"),
             "peer_ip": ip,
             "peer_id": request.args.get("peer_id"),
+            "private": request.args.get("private", "0"),
         }
         if event := request.args.get("event"):
             _data |= {"event_name": convert_event_name_to_event_enum(event)}
@@ -85,6 +127,9 @@ async def http_endpoint():
         )
         return ""
 
+    # Resolve country (non-blocking, cached in Redis)
+    country = await resolve_country(ip)
+
     redis_storage = RedisDatastructure(
         info_hash=data.info_hash,
         type="http",
@@ -92,45 +137,51 @@ async def http_endpoint():
         peer_ip=data.peer_ip,
         port=data.port,
         left=data.left,
+        country=country,
     )
 
     await redis_storage.save()
+
+    # BEP27: validate private torrent announce
+    warning_message = None
+    torrent_info = TorrentInfo(private=data.private)
+    violations = validate_private_torrent_announce(
+        torrent_info, AnnounceParams()
+    )
+    if violations:
+        warning_message = "; ".join(violations)
+        logging.warning(
+            "Private torrent violation %s: %s", data.info_hash, warning_message
+        )
+
+    # Geo-aware peer selection with oversampling + ranking
+    ranked_peers = await select_peers(
+        requester_ip=ip,
+        info_hash=data.info_hash,
+        numwant=data.numwant,
+        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
+    )
 
     peers = MutableBox[list[dict[str, str]]]([])
     peers6 = MutableBox[list[dict[str, str]]]([])
     seeders = MutableBox[int](0)
     leechers = MutableBox[int](0)
 
-    random_peer_keys = await zrandmember(
-        hash_key=data.info_hash,
-        numwant=data.numwant,
-        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-    )
-    peer_json_list = await hmget(
-        hash_key=data.info_hash,
-        fields=random_peer_keys,
-        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-    )
-
-    for peer in peer_json_list:
-        if not peer:
-            continue
+    for ranked in ranked_peers:
         try:
             with rollback_on_exception(peers, peers6, seeders, leechers):
-                peer_data = RedisDatastructure(**json.loads(peer))
-
-                if peer_data.left == 0:
+                if ranked.left == 0:
                     seeders.value += 1
                 else:
                     leechers.value += 1
 
                 appendable_data = {
-                    "peer id": peer_data.peer_id,
-                    "ip": peer_data.peer_ip,
-                    "port": peer_data.port,
+                    "peer id": ranked.peer_id,
+                    "ip": ranked.peer_ip,
+                    "port": ranked.port,
                 }
 
-                if (ip_type := check_ip_type(peer_data.peer_ip)):
+                if (ip_type := check_ip_type(ranked.peer_ip)):
                     if ip_type == IP.IPV4:
                         peers.value.append(appendable_data)
                     else:
@@ -151,6 +202,8 @@ async def http_endpoint():
         "complete": seeders.value,
         "incomplete": leechers.value,
     }
+    if warning_message:
+        output["warning message"] = warning_message
     logging.info(
         f"HTTP announce {data.info_hash} event={data.event_name} "
         f"v4={len(peers.value)} v6={len(peers6.value)} "
@@ -176,30 +229,18 @@ async def scrape_endpoint():
 
     info_hash = info_hash_raw if isinstance(info_hash_raw, str) else info_hash_raw.hex()
 
-    seeders = 0
-    leechers = 0
-
-    peer_keys = await zrandmember(
-        hash_key=info_hash,
+    # Use select_peers with large numwant to get all peers for scrape
+    ranked_peers = await select_peers(
+        requester_ip=ip,
+        info_hash=info_hash,
         numwant=999999,
         namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
     )
-    if peer_keys:
-        peer_json_list = await hmget(
-            hash_key=info_hash,
-            fields=peer_keys,
-            namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-        )
-        for peer in peer_json_list:
-            if peer:
-                try:
-                    peer_data = RedisDatastructure(**json.loads(peer))
-                    if peer_data.left == 0:
-                        seeders += 1
-                    else:
-                        leechers += 1
-                except TypeError:
-                    pass
+    for ranked in ranked_peers:
+        if ranked.left == 0:
+            seeders += 1
+        else:
+            leechers += 1
 
     response = {
         "files": {
@@ -243,3 +284,81 @@ async def api_endpoint():
         "redis_data": result,
     }
     return jsonify(data), HTTPStatus.OK
+
+
+@http_blueprint.route("/api/geo")
+async def geo_api_endpoint():
+    """Return geo database stats for the frontend."""
+    from coreproject_tracker.geo import get_geo_stats
+
+    stats = get_geo_stats()
+    return jsonify(stats), HTTPStatus.OK
+
+
+@http_blueprint.route("/api/tracker_data")
+async def tracker_data_endpoint():
+    """Return all swarm peer data with country codes for the radar map.
+
+    Frontend uses this to render connection lines on the map.
+    Heavily cached in Redis - geo lookups use TTL cache.
+    """
+    from coreproject_tracker.geo import resolve_countries_batch
+
+    r = get_redis()
+
+    # Get all hash keys (swarms)
+    hash_keys = await get_all_hash_keys()
+
+    # Decode all hash data
+    pipe = await r.pipeline()
+    for hash_key in hash_keys:
+        await pipe.hgetall(hash_key)
+    raw_hash_data = await pipe.execute()
+
+    decoded = await decode_dictionary(dict(zip(hash_keys, raw_hash_data)))
+
+    # Collect all unique IPs for batch geo resolution
+    all_ips: list[str] = []
+    for swarm_key, peers in decoded.items():
+        if not isinstance(peers, dict):
+            continue
+        for peer_key, peer_json_str in peers.items():
+            if not isinstance(peer_json_str, dict):
+                continue
+            ip = peer_json_str.get("peer_ip", "")
+            if ip and ip not in all_ips:
+                all_ips.append(ip)
+
+    # Batch resolve all IPs to countries (Redis-cached)
+    country_map = await resolve_countries_batch(all_ips)
+
+    # Build response: list of swarms with peer locations
+    swarms = []
+    total_peers = 0
+    for swarm_key, peers in decoded.items():
+        if not isinstance(peers, dict):
+            continue
+        peer_list = []
+        for peer_key, peer_data in peers.items():
+            if not isinstance(peer_data, dict):
+                continue
+            ip = peer_data.get("peer_ip", "")
+            peer_list.append({
+                "ip": ip,
+                "port": peer_data.get("port", 0),
+                "country": country_map.get(ip) or peer_data.get("country", ""),
+                "continent": "",
+                "seeders": 1 if peer_data.get("left", 1) == 0 else 0,
+            })
+            total_peers += 1
+        swarms.append({
+            "info_hash": swarm_key.replace("http_udp:", "").replace("websocket:", ""),
+            "peers": peer_list,
+            "peer_count": len(peer_list),
+        })
+
+    return jsonify({
+        "swarms": swarms,
+        "total_peers": total_peers,
+        "total_swarms": len(swarms),
+    }), HTTPStatus.OK

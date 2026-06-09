@@ -148,6 +148,30 @@ async def zrandmember(
     return members or []
 
 
+async def zrandmember_with_scores(
+    hash_key: str,
+    count: int,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> list[tuple[str, float]]:
+    """Get random members with their base scores from the sorted set."""
+    r = get_redis()
+    namespaced_key = _ns_key_z(namespace, hash_key)
+    members = await r.zrandmember(namespaced_key, count, withscores=True)
+    if not members:
+        return []
+    return [(str(m), float(s)) for m, s in members]
+
+
+async def zcard(
+    hash_key: str,
+    namespace: REDIS_NAMESPACE_ENUM,
+) -> int:
+    """Get the number of members in the sorted set."""
+    r = get_redis()
+    namespaced_key = _ns_key_z(namespace, hash_key)
+    return await r.zcard(namespaced_key)
+
+
 async def zrem(
     hash_key: str,
     field: str,
@@ -160,6 +184,6 @@ async def zrem(
 
 __all__ = [
     "hset", "hgetall", "hmget", "hdel",
-    "zadd", "zrandmember", "zrem",
+    "zadd", "zrandmember", "zrandmember_with_scores", "zcard", "zrem",
     "save_peer_pipeline", "get_all_hash_keys",
 ]

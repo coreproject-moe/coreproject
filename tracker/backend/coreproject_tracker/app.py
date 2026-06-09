@@ -1,3 +1,5 @@
+"""Quart app factory with geo initialization and Redis lifecycle."""
+
 from quart import Quart
 from quart_cors import cors
 
@@ -13,7 +15,12 @@ from coreproject_tracker.servers import http_blueprint, ws_blueprint
 from coreproject_tracker.validators import _load_blocklist
 
 
-def make_app() -> Quart:
+def create_quart_app() -> Quart:
+    """Build and configure the Quart application.
+
+    Sets up CORS, optional orjson provider, blocklist loading,
+    Redis lifecycle hooks, and registers HTTP/WebSocket blueprints.
+    """
     app = Quart(__name__)
     app = cors(app, allow_origin="*")
 
@@ -28,11 +35,13 @@ def make_app() -> Quart:
     redis_manager = RedisHandler(REDIS_URI)
 
     @app.before_serving
-    async def before_serving():
+    async def initialize_redis_connection():
+        """Connect to Redis before the server starts accepting requests."""
         await redis_manager.init_redis()
 
     @app.after_serving
-    async def after_serving():
+    async def close_redis_connection():
+        """Close Redis connection when the server shuts down."""
         await redis_manager.close_redis()
 
     app.register_blueprint(http_blueprint)

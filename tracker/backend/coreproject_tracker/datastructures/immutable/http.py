@@ -28,6 +28,7 @@ class HttpDatastructure:
     peer_ip: str = field(converter=convert_ip, validator=[validate_ip])
 
     event_name: EVENT_NAMES = field(default=None)
+    private: bool = field(default=False, converter=bool)
 
     # Derived
     info_hash: str = field(init=False)

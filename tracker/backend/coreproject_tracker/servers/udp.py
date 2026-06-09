@@ -24,10 +24,10 @@ from coreproject_tracker.functions import (
     from_uint32,
     from_uint64,
     hdel,
-    hmget,
+    select_peers,
     to_uint32,
-    zrandmember,
 )
+from coreproject_tracker.geo import resolve_country
 from coreproject_tracker.singletons import RedisHandler
 from coreproject_tracker.transaction import rollback_on_exception
 from coreproject_tracker.validators import check_rate_limit, is_blocked
@@ -77,6 +77,10 @@ async def _handle_announce(
     port: int,
 ) -> tuple[bytes, bool]:
     peer_key = f"{data.ip}:{data.port}"
+
+    # Resolve country (non-blocking, cached in Redis)
+    country = await resolve_country(data.ip)
+
     redis_storage = RedisDatastructure(
         info_hash=data.info_hash.hex(),
         type="udp",
@@ -84,17 +88,15 @@ async def _handle_announce(
         peer_ip=data.ip,
         port=data.port,
         left=data.left,
+        country=country,
     )
     await redis_storage.save()
 
-    random_peer_keys = await zrandmember(
-        hash_key=data.info_hash.hex(),
+    # Geo-aware peer selection with oversampling + ranking
+    ranked_peers = await select_peers(
+        requester_ip=data.ip,
+        info_hash=data.info_hash.hex(),
         numwant=data.numwant,
-        namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-    )
-    peer_json_list = await hmget(
-        hash_key=data.info_hash.hex(),
-        fields=random_peer_keys,
         namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
     )
 
@@ -102,17 +104,14 @@ async def _handle_announce(
     seeders = MutableBox[int](0)
     leechers = MutableBox[int](0)
 
-    for peer in peer_json_list:
-        if not peer:
-            continue
+    for ranked in ranked_peers:
         try:
             with rollback_on_exception(peers, seeders, leechers):
-                peer_data = RedisDatastructure(**json.loads(peer))
-                if peer_data.left == 0:
+                if ranked.left == 0:
                     seeders.value += 1
                 else:
                     leechers.value += 1
-                peers.value.append(f"{peer_data.peer_ip}:{peer_data.port}")
+                peers.value.append(f"{ranked.peer_ip}:{ranked.port}")
         except TypeError:
             logging.error(f"Error in peer data, deleting: {data.peer_id}")
             await hdel(
@@ -151,34 +150,25 @@ async def _handle_announce(
 
 async def _handle_scrape(data: UdpDatastructure, info_hashes: list[bytes]) -> bytes:
     torrents = bytearray()
-    for ih in info_hashes:
-        ih_hex = ih.hex()
+    for info_hash_bytes in info_hashes:
+        info_hash_hex = info_hash_bytes.hex()
         seeders = 0
         leechers = 0
 
-        peer_keys = await zrandmember(
-            hash_key=ih_hex,
+        # Use select_peers with large numwant to get all peers for scrape
+        ranked_peers = await select_peers(
+            requester_ip="0.0.0.0",
+            info_hash=info_hash_hex,
             numwant=999999,
             namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
         )
-        if peer_keys:
-            peer_json_list = await hmget(
-                hash_key=ih_hex,
-                fields=peer_keys,
-                namespace=REDIS_NAMESPACE_ENUM.HTTP_UDP,
-            )
-            for peer in peer_json_list:
-                if peer:
-                    try:
-                        peer_data = RedisDatastructure(**json.loads(peer))
-                        if peer_data.left == 0:
-                            seeders += 1
-                        else:
-                            leechers += 1
-                    except TypeError:
-                        pass
+        for ranked in ranked_peers:
+            if ranked.left == 0:
+                seeders += 1
+            else:
+                leechers += 1
 
-        ih_bencoded = f"{len(ih_hex)}:{ih_hex}".encode()
+        ih_bencoded = f"{len(info_hash_hex)}:{info_hash_hex}".encode()
         stats = f"l5:completei{seeders}e8:incompletei{leechers}ee"
         torrents.extend(ih_bencoded + stats.encode())
 
@@ -216,6 +206,16 @@ async def run_udp_server(server_host: str, server_port: int):
                     "transaction_id": from_uint32(packet[12:16]),
                 }
                 data = UdpDatastructure(**_data)
+
+                # Validate action code is in valid range [0,3]
+                if data.action > ACTIONS.ERROR:
+                    error_packet = b"".join([
+                        to_uint32(ACTIONS.ERROR),
+                        to_uint32(data.transaction_id),
+                        b"Invalid action code",
+                    ])
+                    await udp.sendto(error_packet, host, port)
+                    continue
 
                 if is_blocked(host):
                     continue
