@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "anyio>=4.8.0",
+    "anyio>=4.14.0",
     "attrs>=25.1.0",
     "bencode-py>=4.0.0",
     "flask-orjson>=2.0.0; platform.python_implementation == 'CPython'",
