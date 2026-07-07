@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "anyio>=4.14.1",
     "attrs>=25.1.0",
-    "bencode-py>=4.0.0",
+    "bencode-py>=4.1.0",
     "flask-orjson>=2.0.0; platform.python_implementation == 'CPython'",
     "hypercorn>=0.17.3",
     "quart>=0.20.0",
