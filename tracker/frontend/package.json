@@ -27,7 +27,7 @@
     "@eslint/eslintrc": "^3",
     "@svgr/webpack": "^8.1.0",
     "@tailwindcss/postcss": "^4",
-    "@types/bencode": "^2.0.4",
+    "@types/bencode": "^4.0.0",
     "@types/node": "^26",
     "@types/react": "^19",
     "@types/react-dom": "^19",
