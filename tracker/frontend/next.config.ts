@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   output: "standalone",
   productionBrowserSourceMaps: true,
   reactCompiler: true,
+  experimental:{
+    useTypeScriptCli: true,
+  },
   turbopack: {
     rules: {
       "*.svg": {
