@@ -318,7 +318,7 @@ wheels = [
 
 [[package]]
 name = "quart"
-version = "0.20.0"
+version = "0.21.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -331,9 +331,9 @@ dependencies = [
     { name = "markupsafe" },
     { name = "werkzeug" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1d/9d/12e1143a5bd2ccc05c293a6f5ae1df8fd94a8fc1440ecc6c344b2b30ce13/quart-0.20.0.tar.gz", hash = "sha256:08793c206ff832483586f5ae47018c7e40bdd75d886fee3fabbdaa70c2cf505d", size = 63874, upload-time = "2024-12-23T13:53:05.664Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/a7/d3e1a5f2afac1b20ca65e740bd2686b45b2c8c9de418d851feddeafadaa0/quart-0.21.0.tar.gz", hash = "sha256:ec05a784151386cf87df51f764825d55f3ac402df4f04fd1dc81faca8897ceda", size = 65409, upload-time = "2026-07-23T20:11:36.585Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/e9/cc28f21f52913adf333f653b9e0a3bf9cb223f5083a26422968ba73edd8d/quart-0.20.0-py3-none-any.whl", hash = "sha256:003c08f551746710acb757de49d9b768986fd431517d0eb127380b656b98b8f1", size = 77960, upload-time = "2024-12-23T13:53:02.842Z" },
+    { url = "https://files.pythonhosted.org/packages/44/a1/05114d779ddad67d45b03faf2de941a74146b37ee1d626a9d193ac4c2153/quart-0.21.0-py3-none-any.whl", hash = "sha256:a21377754d52ee3a9de7f9bff140dc3bb055e2eec8ac187da1789b36cf4c66ca", size = 78863, upload-time = "2026-07-23T20:11:35.162Z" },
 ]
 
 [[package]]
@@ -419,7 +419,7 @@ requires-dist = [
     { name = "bencode-py", specifier = ">=4.1.0" },
     { name = "flask-orjson", marker = "platform_python_implementation == 'CPython'", specifier = ">=2.0.0" },
     { name = "hypercorn", specifier = ">=0.17.3" },
-    { name = "quart", specifier = ">=0.20.0" },
+    { name = "quart", specifier = ">=0.21.0" },
     { name = "quart-cors", specifier = ">=0.8.0" },
     { name = "redis", extras = ["hiredis"], specifier = ">=8.0.1" },
     { name = "uvloop", marker = "sys_platform == 'linux'", specifier = ">=0.21.0" },
