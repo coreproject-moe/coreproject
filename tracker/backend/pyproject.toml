@@ -29,7 +29,6 @@ dev = [
 ]
 lint = [
     "ruff>=0.17.5",
-
 ]
 
 [tool.uv]
