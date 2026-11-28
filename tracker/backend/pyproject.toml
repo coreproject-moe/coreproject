@@ -25,7 +25,7 @@ coreproject_tracker = "coreproject_tracker.__main__:main"
 [dependency-groups]
 dev = [
     "py-spy>=0.4.4",
-    "pyrefly>=1.4.1",
+    "pyrefly>=1.5.0",
 ]
 lint = [
     "ruff>=0.17.6",
